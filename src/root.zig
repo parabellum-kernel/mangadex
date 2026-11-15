@@ -8,7 +8,7 @@ pub const env = @import("env.zig");
 pub const config = @import("config.zig");
 pub const AppConfig = config.AppConfig;
 
-pub const plugin_version = "0.1.0";
+pub const plugin_version = "1.0.0";
 pub const container = @import("container.zig");
 pub const tasks = struct {
     pub const fetch_series_details = @import("tasks/fetch_series_details.zig");
