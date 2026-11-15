@@ -1,0 +1,311 @@
+const std = @import("std");
+const Allocator = std.mem.Allocator;
+const Logger = @import("flowdata_abi").Logger;
+const zip_archive = @import("zip_archive");
+const ZipArchiveWriter = zip_archive.ZipArchiveWriter;
+const PageWithContentType = @import("detect_content_type.zig").PageWithContentType;
+const ComicInfoOutput = @import("generate_comicinfo.zig").ComicInfoOutput;
+
+const c_stat = struct {
+    extern "c" fn mkdir(path: [*:0]const u8, mode: std.c.mode_t) c_int;
+};
+
+fn ensureParentDirs(alloc: Allocator, path: []const u8) void {
+    const slash_idx = std.mem.lastIndexOfScalar(u8, path, '/') orelse return;
+    if (slash_idx == 0) return;
+    const parent = path[0..slash_idx];
+
+    var it = std.mem.splitScalar(u8, parent, '/');
+    var buf: std.ArrayListUnmanaged(u8) = .empty;
+    defer buf.deinit(alloc);
+
+    if (parent[0] == '/') {
+        buf.append(alloc, '/') catch return;
+    }
+
+    while (it.next()) |seg| {
+        if (seg.len == 0 or std.mem.eql(u8, seg, ".")) {
+            if (seg.len > 0) {
+                buf.appendSlice(alloc, seg) catch return;
+                buf.append(alloc, '/') catch return;
+            }
+            continue;
+        }
+        buf.appendSlice(alloc, seg) catch return;
+        if (alloc.dupeSentinel(u8, buf.items, 0)) |dir_z| {
+            defer alloc.free(dir_z);
+            _ = c_stat.mkdir(dir_z.ptr, 0o755);
+        } else |_| return;
+        buf.append(alloc, '/') catch return;
+    }
+}
+
+pub const BuildCbzArchiveInputs = struct {
+    pages: []const PageWithContentType,
+    comic_infos: []const ComicInfoOutput,
+    output_dir: []const u8 = "./output/cbz",
+    output_path: ?[]const u8 = null,
+    in_memory: bool = false,
+    series_title: ?[]const u8 = null,
+    title: ?[]const u8 = null,
+    library: ?[]const u8 = null,
+    default_library: ?[]const u8 = null,
+};
+
+pub const CbzArchiveOutput = struct {
+    archive_path: []const u8 = "",
+    filename: []const u8 = "",
+    series_id: []const u8 = "",
+    series: []const u8 = "",
+    library: []const u8 = "",
+    chapter_number: []const u8 = "",
+    data: []const u8 = "",
+    total_pages: u32,
+    file_size_bytes: u64,
+};
+
+fn extensionForContentType(ct: []const u8) []const u8 {
+    if (std.mem.eql(u8, ct, "image/png")) return "png";
+    if (std.mem.eql(u8, ct, "image/jpeg")) return "jpg";
+    if (std.mem.eql(u8, ct, "image/webp")) return "webp";
+    if (std.mem.eql(u8, ct, "image/gif")) return "gif";
+    return "bin";
+}
+
+fn replacePlaceholders(alloc: Allocator, template: []const u8, chapter_num: []const u8, series_id: []const u8) ![]const u8 {
+    var replaced: std.ArrayListUnmanaged(u8) = .empty;
+    errdefer replaced.deinit(alloc);
+    var rem = template;
+
+    while (rem.len > 0) {
+        if (std.mem.startsWith(u8, rem, "{chapter}")) {
+            try replaced.appendSlice(alloc, chapter_num);
+            rem = rem["{chapter}".len..];
+        } else if (std.mem.startsWith(u8, rem, "{series}")) {
+            try replaced.appendSlice(alloc, series_id);
+            rem = rem["{series}".len..];
+        } else {
+            try replaced.append(alloc, rem[0]);
+            rem = rem[1..];
+        }
+    }
+    return replaced.toOwnedSlice(alloc);
+}
+
+fn findComicInfoForChapter(comic_infos: []const ComicInfoOutput, chapter_num: []const u8) ?[]const u8 {
+    for (comic_infos) |ci| {
+        if (std.mem.eql(u8, ci.chapter_number, chapter_num) and ci.xml_data.len > 0) {
+            return ci.xml_data;
+        }
+    }
+    return null;
+}
+
+fn customizeComicInfo(alloc: Allocator, base_xml: []const u8, chapter_num: []const u8, page_count: u32) ![]const u8 {
+    var result: std.ArrayListUnmanaged(u8) = .empty;
+    errdefer result.deinit(alloc);
+
+    var xml = base_xml;
+    var had_number = false;
+
+    // 1. Replace <Number>...</Number> if present
+    if (std.mem.indexOf(u8, xml, "<Number>")) |num_start| {
+        if (std.mem.indexOf(u8, xml[num_start..], "</Number>")) |num_end_rel| {
+            had_number = true;
+            const num_end = num_start + num_end_rel + "</Number>".len;
+            try result.appendSlice(alloc, xml[0..num_start]);
+            try result.appendSlice(alloc, "<Number>");
+            try result.appendSlice(alloc, chapter_num);
+            try result.appendSlice(alloc, "</Number>");
+            xml = xml[num_end..];
+        }
+    }
+
+    // 2. Insert <Number> (if absent) and <PageCount> before </ComicInfo>
+    if (std.mem.indexOf(u8, xml, "</ComicInfo>")) |close_idx| {
+        try result.appendSlice(alloc, xml[0..close_idx]);
+        if (!had_number and std.mem.indexOf(u8, result.items, "<Number>") == null) {
+            const num_tag = try std.fmt.allocPrint(alloc, "  <Number>{s}</Number>\n", .{chapter_num});
+            defer alloc.free(num_tag);
+            try result.appendSlice(alloc, num_tag);
+        }
+        if (std.mem.indexOf(u8, result.items, "<PageCount>") == null) {
+            const pc_tag = try std.fmt.allocPrint(alloc, "  <PageCount>{d}</PageCount>\n", .{page_count});
+            defer alloc.free(pc_tag);
+            try result.appendSlice(alloc, pc_tag);
+        }
+        try result.appendSlice(alloc, "</ComicInfo>");
+    } else {
+        try result.appendSlice(alloc, xml);
+    }
+
+    return result.toOwnedSlice(alloc);
+}
+
+/// Service that bundles comic page image streams and optional ComicInfo.xml metadata
+/// into standard per-chapter .cbz (ZIP) archives using STORE compression for maximum throughput.
+pub const BuildCbzArchiveService = struct {
+    logger: Logger,
+
+    pub fn execute(self: *BuildCbzArchiveService, alloc: Allocator, inputs: BuildCbzArchiveInputs) ![]CbzArchiveOutput {
+        if (inputs.pages.len == 0) {
+            self.logger.warn("Cannot build CBZ archive: no pages provided", .{});
+            return &.{};
+        }
+
+        const resolved_series = blk: {
+            if (inputs.series_title) |st| {
+                if (st.len > 0) break :blk st;
+            }
+            if (inputs.title) |t| {
+                if (t.len > 0) break :blk t;
+            }
+            break :blk "";
+        };
+        const resolved_library = blk: {
+            if (inputs.library) |lib| {
+                if (lib.len > 0) break :blk lib;
+            }
+            if (inputs.default_library) |dlib| {
+                if (dlib.len > 0) break :blk dlib;
+            }
+            break :blk "";
+        };
+
+        const ChapterGroup = struct {
+            chapter_number: []const u8,
+            pages: std.ArrayListUnmanaged(PageWithContentType) = .empty,
+        };
+
+        var groups: std.ArrayListUnmanaged(ChapterGroup) = .empty;
+        defer {
+            for (groups.items) |*g| g.pages.deinit(alloc);
+            groups.deinit(alloc);
+        }
+
+        for (inputs.pages) |page| {
+            const ch_num = if (page.chapter_number.len > 0) page.chapter_number else "1";
+            var found: ?*ChapterGroup = null;
+            for (groups.items) |*g| {
+                if (std.mem.eql(u8, g.chapter_number, ch_num)) {
+                    found = g;
+                    break;
+                }
+            }
+            if (found == null) {
+                try groups.append(alloc, .{
+                    .chapter_number = ch_num,
+                    .pages = .empty,
+                });
+                found = &groups.items[groups.items.len - 1];
+            }
+            try found.?.pages.append(alloc, page);
+        }
+
+        const PageSortCtx = struct {
+            pub fn lessThan(_: @This(), a: PageWithContentType, b: PageWithContentType) bool {
+                return a.page_number < b.page_number;
+            }
+        };
+
+        var results: std.ArrayListUnmanaged(CbzArchiveOutput) = .empty;
+
+        for (groups.items) |*group| {
+            std.mem.sort(PageWithContentType, group.pages.items, PageSortCtx{}, PageSortCtx.lessThan);
+
+            const series_id = if (group.pages.items.len > 0) group.pages.items[0].series_id else "";
+            const series_label = if (resolved_series.len > 0) resolved_series else series_id;
+            const filename = try std.fmt.allocPrint(alloc, "chapter_{s}.cbz", .{group.chapter_number});
+
+            const archive_path: []const u8 = if (inputs.in_memory) "" else if (inputs.output_path) |op| blk: {
+                if (std.mem.indexOf(u8, op, "{chapter}") != null or std.mem.indexOf(u8, op, "{series}") != null) {
+                    break :blk try replacePlaceholders(alloc, op, group.chapter_number, series_label);
+                } else if (groups.items.len == 1 and std.mem.endsWith(u8, op, ".cbz")) {
+                    break :blk try alloc.dupe(u8, op);
+                } else {
+                    const resolved_dir = try replacePlaceholders(alloc, inputs.output_dir, group.chapter_number, series_label);
+                    defer alloc.free(resolved_dir);
+                    break :blk try std.fmt.allocPrint(alloc, "{s}/{s}", .{ resolved_dir, filename });
+                }
+            } else blk: {
+                const resolved_dir = try replacePlaceholders(alloc, inputs.output_dir, group.chapter_number, series_label);
+                defer alloc.free(resolved_dir);
+                break :blk try std.fmt.allocPrint(alloc, "{s}/{s}", .{ resolved_dir, filename });
+            };
+
+            if (inputs.in_memory) {
+                self.logger.info("Building in-memory CBZ archive '{s}' with {d} pages", .{
+                    filename,
+                    group.pages.items.len,
+                });
+            } else {
+                self.logger.info("Building CBZ archive '{s}' with {d} pages", .{
+                    archive_path,
+                    group.pages.items.len,
+                });
+                ensureParentDirs(alloc, archive_path);
+            }
+
+            var writer = if (inputs.in_memory)
+                try ZipArchiveWriter.createInMemory(alloc)
+            else
+                try ZipArchiveWriter.create(alloc, archive_path);
+            defer writer.deinit();
+
+            // 1. Add ComicInfo.xml (deflated compression)
+            if (findComicInfoForChapter(inputs.comic_infos, group.chapter_number)) |base_xml| {
+                const tailored = try customizeComicInfo(alloc, base_xml, group.chapter_number, @intCast(group.pages.items.len));
+                defer alloc.free(tailored);
+                self.logger.info("Adding ComicInfo.xml to CBZ archive (chapter: {s}, {d} bytes)", .{ group.chapter_number, tailored.len });
+                try writer.addFileFromMemory("ComicInfo.xml", tailored, .default);
+            }
+
+            // 2. Add each page image in STORE mode
+            for (group.pages.items, 0..) |page, idx| {
+                const ext = extensionForContentType(page.content_type);
+                const page_idx = if (page.page_number > 0) page.page_number else @as(u32, @intCast(idx + 1));
+                const entry_name = try std.fmt.allocPrint(alloc, "{d:0>3}.{s}", .{ page_idx, ext });
+                defer alloc.free(entry_name);
+                try writer.addFileFromMemory(entry_name, page.image_data, .store);
+            }
+
+            var mem_bytes: []const u8 = "";
+            var file_size: u64 = 0;
+
+            if (inputs.in_memory) {
+                mem_bytes = try writer.finishInMemory();
+                file_size = mem_bytes.len;
+                self.logger.info("Successfully created in-memory CBZ archive '{s}' ({d} bytes, {d} pages)", .{
+                    filename,
+                    file_size,
+                    group.pages.items.len,
+                });
+            } else {
+                try writer.finish();
+                const io = std.Io.Threaded.global_single_threaded.io();
+                if (std.Io.Dir.cwd().statFile(io, archive_path, .{})) |st| {
+                    file_size = st.size;
+                } else |_| {}
+                self.logger.info("Successfully created CBZ archive '{s}' ({d} bytes, {d} pages)", .{
+                    archive_path,
+                    file_size,
+                    group.pages.items.len,
+                });
+            }
+
+            try results.append(alloc, .{
+                .archive_path = archive_path,
+                .filename = filename,
+                .series_id = series_id,
+                .series = series_label,
+                .library = resolved_library,
+                .chapter_number = group.chapter_number,
+                .data = mem_bytes,
+                .total_pages = @intCast(group.pages.items.len),
+                .file_size_bytes = file_size,
+            });
+        }
+
+        return results.toOwnedSlice(alloc);
+    }
+};
