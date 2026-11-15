@@ -104,10 +104,19 @@ pub const tasks = [_]abi.TaskDescriptor_ABI{
     }),
 };
 
-pub const manifest: abi.ModuleManifest_ABI = abi.defineManifest(
+const required_plugins = [_]abi.PluginRequirement_ABI{
+    .{ .kind = .driver, .name = "yaml_file" },
+    .{ .kind = .driver, .name = "memory" },
+    .{ .kind = .driver, .name = "sqlite" },
+    .{ .kind = .driver, .name = "file_store" },
+    .{ .kind = .driver, .name = "ssh_store" },
+};
+
+pub const manifest: abi.ModuleManifest_ABI = abi.defineManifestWithRequires(
     "manga_catalog",
     .{ .major = 1, .minor = 0, .patch = 0 },
     &tasks,
+    &required_plugins,
 );
 
 comptime {
