@@ -2,7 +2,7 @@
 # =============================================================================
 # MangaDex Pipeline Execution Script
 # Orchestrates build, pre-flight verification, permissions, and execution
-# of Flowdata pipelines for MangaDex.
+# of Parabellum pipelines for MangaDex.
 # =============================================================================
 
 set -euo pipefail
@@ -92,7 +92,7 @@ fi
 # 2. Ensure output directory structure exists for artifacts, databases, and logs
 mkdir -p "$SCRIPT_DIR/output/logs" "$SCRIPT_DIR/output/cbz"
 
-# 3. Enforce secure permissions on shared libraries (.so) required by Flowdata ABI security policy
+# 3. Enforce secure permissions on shared libraries (.so) required by Parabellum ABI security policy
 if [[ -d "$LIB_DIR" ]]; then
     chmod 755 "$LIB_DIR"/*.so 2>/dev/null || true
 fi

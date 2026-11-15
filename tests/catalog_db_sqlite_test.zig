@@ -1,12 +1,12 @@
 const std = @import("std");
-const flowdata = @import("flowdata");
-const sqlite_driver = @import("flowdata_datasource_sqlite");
+const parabellum = @import("parabellum");
+const sqlite_driver = @import("parabellum_datasource_sqlite");
 const SeriesDetails = @import("mangadex_app").tasks.fetch_series_details.SeriesDetails;
-const RepositoryRegistry = flowdata.RepositoryRegistry;
-const WriteSpec = flowdata.dataflow.WriteSpec;
-const ReadSpec = flowdata.dataflow.ReadSpec;
-const PayloadHandle = flowdata.dataflow.PayloadHandle;
-const PredicateNode = flowdata.dataflow.predicate_ast.PredicateNode;
+const RepositoryRegistry = parabellum.RepositoryRegistry;
+const WriteSpec = parabellum.dataflow.WriteSpec;
+const ReadSpec = parabellum.dataflow.ReadSpec;
+const PayloadHandle = parabellum.dataflow.PayloadHandle;
+const PredicateNode = parabellum.dataflow.predicate_ast.PredicateNode;
 
 test "MangaDex catalog_db works end-to-end with SQLite driver and schemas.yaml" {
     const alloc = std.testing.allocator;
@@ -15,7 +15,7 @@ test "MangaDex catalog_db works end-to-end with SQLite driver and schemas.yaml" 
     defer registry.deinit();
     try registry.registerDriver("sqlite", &sqlite_driver.SqliteRepository.createHeap);
 
-    const params = [_]flowdata.repository.ConfigParam{
+    const params = [_]parabellum.repository.ConfigParam{
         .{ .key = "path", .value = ":memory:" },
         .{ .key = "schema", .value = "configs/schemas.yaml" },
     };
@@ -64,7 +64,7 @@ test "MangaDex catalog_db works end-to-end with SQLite driver and schemas.yaml" 
     });
 
     try std.testing.expectEqual(@as(usize, 1), result.len);
-    const rows = result.asSlice(flowdata.dataflow.DynamicRecord);
+    const rows = result.asSlice(parabellum.dataflow.DynamicRecord);
     try std.testing.expectEqualStrings("Low Orbit Human", rows[0].getReflected("title").?.string);
     try std.testing.expectEqual(@as(i64, 2024), rows[0].getReflected("year").?.int);
 

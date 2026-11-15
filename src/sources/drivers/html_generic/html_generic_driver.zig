@@ -8,7 +8,7 @@ const SourceChapter = contract.SourceChapter;
 const SourcePageUrl = contract.SourcePageUrl;
 
 /// Placeholder / skeleton for Tier 1 HTML web scrapers.
-/// Intended to be backed by Flowdata's OutboundAdapter and a lightweight parser.
+/// Intended to be backed by Parabellum's OutboundAdapter and a lightweight parser.
 pub const HtmlGenericSource = struct {
     source_id: []const u8 = "html_generic",
     base_url: []const u8 = "",

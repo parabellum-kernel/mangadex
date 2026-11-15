@@ -1,6 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Logger = @import("flowdata_abi").Logger;
+const Logger = @import("parabellum_abi").Logger;
 const comicinfo = @import("comicinfo");
 const ComicInfo = comicinfo.ComicInfo;
 const MangaType = comicinfo.MangaType;

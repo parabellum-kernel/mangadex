@@ -7,7 +7,7 @@ const komga_sdk = @import("komga_sdk");
 pub const AppConfig = struct {
     api_url: []const u8 = "https://api.mangadex.org",
     auth_url: []const u8 = "https://auth.mangadex.org/realms/mangadex/protocol/openid-connect/token",
-    user_agent: []const u8 = "FlowdataMangaDex/1.0.0 (https://github.com/flowdata)",
+    user_agent: []const u8 = "ParabellumMangaDex/1.0.0 (https://github.com/parabellum)",
 
     // Komga integration settings
     komga_url: []const u8 = "http://localhost:25600",

@@ -1,7 +1,7 @@
 const std = @import("std");
-const abi = @import("flowdata_abi");
-const FlowdataHttpAdapter = @import("mangadex_app").adapters.FlowdataHttpAdapter;
-const FlowdataKomgaAdapter = @import("mangadex_app").adapters.FlowdataKomgaAdapter;
+const abi = @import("parabellum_abi");
+const ParabellumHttpAdapter = @import("mangadex_app").adapters.ParabellumHttpAdapter;
+const ParabellumKomgaAdapter = @import("mangadex_app").adapters.ParabellumKomgaAdapter;
 const sdk = @import("mangadex_sdk");
 const komga_sdk = @import("mangadex_app").komga_sdk;
 
@@ -84,13 +84,13 @@ fn makeMockTaskContext(state: *MockState, raw_ctx: *abi.TaskContext_ABI) abi.Tas
     return .{ .raw = raw_ctx };
 }
 
-test "FlowdataHttpAdapter bridges TaskContext.netRequest to sdk.HttpTransport" {
+test "ParabellumHttpAdapter bridges TaskContext.netRequest to sdk.HttpTransport" {
     const allocator = std.testing.allocator;
     var state = MockState{};
     var raw_ctx: abi.TaskContext_ABI = undefined;
     const task_ctx = makeMockTaskContext(&state, &raw_ctx);
 
-    var bridge = FlowdataHttpAdapter.fromTaskContext(task_ctx);
+    var bridge = ParabellumHttpAdapter.fromTaskContext(task_ctx);
     const transport = bridge.httpTransport();
 
     const resp1 = try transport.execute(allocator, .GET, "https://api.mangadex.org/ping", &.{}, "");
@@ -102,25 +102,25 @@ test "FlowdataHttpAdapter bridges TaskContext.netRequest to sdk.HttpTransport" {
     try std.testing.expectEqual(@as(u16, 429), resp2.status_code);
 }
 
-test "FlowdataHttpAdapter maps network error properly" {
+test "ParabellumHttpAdapter maps network error properly" {
     var state = MockState{ .mode = .rate_limited_err };
     var raw_ctx: abi.TaskContext_ABI = undefined;
     const task_ctx = makeMockTaskContext(&state, &raw_ctx);
 
-    var bridge = FlowdataHttpAdapter.fromTaskContext(task_ctx);
+    var bridge = ParabellumHttpAdapter.fromTaskContext(task_ctx);
     const transport = bridge.httpTransport();
 
     const err = transport.execute(std.testing.allocator, .GET, "https://api.mangadex.org/test", &.{}, "");
     try std.testing.expectError(error.RateLimited, err);
 }
 
-test "FlowdataKomgaAdapter bridges TaskContext.netRequest to komga_sdk.HttpTransport" {
+test "ParabellumKomgaAdapter bridges TaskContext.netRequest to komga_sdk.HttpTransport" {
     const allocator = std.testing.allocator;
     var state = MockState{};
     var raw_ctx: abi.TaskContext_ABI = undefined;
     const task_ctx = makeMockTaskContext(&state, &raw_ctx);
 
-    var bridge = FlowdataKomgaAdapter.fromTaskContext(task_ctx);
+    var bridge = ParabellumKomgaAdapter.fromTaskContext(task_ctx);
     const transport = bridge.httpTransport();
 
     const resp1 = try transport.execute(allocator, .GET, "http://localhost:25600/ping", &.{}, "");
@@ -139,12 +139,12 @@ test "FlowdataKomgaAdapter bridges TaskContext.netRequest to komga_sdk.HttpTrans
     try std.testing.expectEqual(@as(u16, 429), resp3.status_code);
 }
 
-test "FlowdataKomgaAdapter maps network error properly" {
+test "ParabellumKomgaAdapter maps network error properly" {
     var state = MockState{ .mode = .rate_limited_err };
     var raw_ctx: abi.TaskContext_ABI = undefined;
     const task_ctx = makeMockTaskContext(&state, &raw_ctx);
 
-    var bridge = FlowdataKomgaAdapter.fromTaskContext(task_ctx);
+    var bridge = ParabellumKomgaAdapter.fromTaskContext(task_ctx);
     const transport = bridge.httpTransport();
 
     const err = transport.execute(std.testing.allocator, .GET, "http://localhost:25600/api/v1/libraries", &.{}, "");

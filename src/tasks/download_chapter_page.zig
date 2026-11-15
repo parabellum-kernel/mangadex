@@ -1,6 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Logger = @import("flowdata_abi").Logger;
+const Logger = @import("parabellum_abi").Logger;
 const sdk = @import("mangadex_sdk");
 const HttpTransport = sdk.HttpTransport;
 const ChapterPageItem = @import("fetch_chapter_pages.zig").ChapterPageItem;

@@ -1,7 +1,7 @@
 {
   "info": {
-    "name": "Flowdata MangaDex Jobs",
-    "description": "Colección sencilla para comprobar el servidor Flowdata (--serve) y enviar JobEnvelopes a /v1/jobs usando variables de colección.",
+    "name": "Parabellum MangaDex Jobs",
+    "description": "Colección sencilla para comprobar el servidor Parabellum (--serve) y enviar JobEnvelopes a /v1/jobs usando variables de colección.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -51,7 +51,7 @@
             "health"
           ]
         },
-        "description": "Comprueba que el servidor Flowdata está escuchando en modo --serve."
+        "description": "Comprueba que el servidor Parabellum está escuchando en modo --serve."
       },
       "response": []
     },

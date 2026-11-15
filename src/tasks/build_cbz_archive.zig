@@ -1,6 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Logger = @import("flowdata_abi").Logger;
+const Logger = @import("parabellum_abi").Logger;
 const zip_archive = @import("zip_archive");
 const ZipArchiveWriter = zip_archive.ZipArchiveWriter;
 const PageWithContentType = @import("detect_content_type.zig").PageWithContentType;

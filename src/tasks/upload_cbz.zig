@@ -1,6 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const abi = @import("flowdata_abi");
+const abi = @import("parabellum_abi");
 const Logger = abi.Logger;
 const komga_sdk = @import("komga_sdk");
 const KomgaClient = komga_sdk.KomgaClient;
