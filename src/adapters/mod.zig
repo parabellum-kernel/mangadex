@@ -1,4 +1,4 @@
-pub const flowdata_http_adapter = @import("flowdata_http_adapter.zig");
-pub const FlowdataHttpAdapter = flowdata_http_adapter.FlowdataHttpAdapter;
-pub const flowdata_komga_adapter = @import("flowdata_komga_adapter.zig");
-pub const FlowdataKomgaAdapter = flowdata_komga_adapter.FlowdataKomgaAdapter;
+pub const parabellum_http_adapter = @import("parabellum_http_adapter.zig");
+pub const ParabellumHttpAdapter = parabellum_http_adapter.ParabellumHttpAdapter;
+pub const parabellum_komga_adapter = @import("parabellum_komga_adapter.zig");
+pub const ParabellumKomgaAdapter = parabellum_komga_adapter.ParabellumKomgaAdapter;

@@ -1,13 +1,13 @@
 const std = @import("std");
-const flowdata = @import("flowdata");
-const yaml_core = flowdata.yaml;
+const parabellum = @import("parabellum");
+const yaml_core = parabellum.yaml;
 
 test "MangaDex pipeline.yaml parses and validates into PipelineAST" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    const yaml_bytes = try flowdata.readFileBytes(alloc, "configs/pipeline.yaml");
+    const yaml_bytes = try parabellum.readFileBytes(alloc, "configs/pipeline.yaml");
 
     var env_interp = yaml_core.EnvInterpolator.init(false);
     const ast = try yaml_core.loadPipelineAstFromYaml(alloc, yaml_bytes, .{
@@ -16,8 +16,8 @@ test "MangaDex pipeline.yaml parses and validates into PipelineAST" {
 
     // 1. Validate runtime
     try std.testing.expectEqual(@as(usize, 4), ast.runtime.workers);
-    try std.testing.expectEqual(flowdata.ast.SchedulerMode.dag, ast.runtime.scheduler);
-    try std.testing.expectEqual(flowdata.ast.RoutingMode.type_driven, ast.runtime.routing);
+    try std.testing.expectEqual(parabellum.ast.SchedulerMode.dag, ast.runtime.scheduler);
+    try std.testing.expectEqual(parabellum.ast.RoutingMode.type_driven, ast.runtime.routing);
     try std.testing.expectEqual(@as(?usize, 512 * 1024 * 1024), ast.runtime.max_inflight_bytes);
     try std.testing.expectEqual(false, ast.runtime.retain_all);
     try std.testing.expectEqualStrings("isolated", ast.runtime.default_network);
@@ -25,19 +25,19 @@ test "MangaDex pipeline.yaml parses and validates into PipelineAST" {
     // 2. Validate declared datasources and roles
     try std.testing.expect(ast.getDatasource("tracked_targets") != null);
     try std.testing.expectEqualStrings("yaml_file", ast.getDatasource("tracked_targets").?.driver);
-    try std.testing.expectEqual(flowdata.ast.DatasourceRole.source, ast.getDatasource("tracked_targets").?.role);
+    try std.testing.expectEqual(parabellum.ast.DatasourceRole.source, ast.getDatasource("tracked_targets").?.role);
 
     try std.testing.expect(ast.getDatasource("pipeline_memory") != null);
     try std.testing.expectEqualStrings("memory", ast.getDatasource("pipeline_memory").?.driver);
-    try std.testing.expectEqual(flowdata.ast.DatasourceRole.duplex, ast.getDatasource("pipeline_memory").?.role);
+    try std.testing.expectEqual(parabellum.ast.DatasourceRole.duplex, ast.getDatasource("pipeline_memory").?.role);
 
     try std.testing.expect(ast.getDatasource("catalog_db") != null);
     try std.testing.expectEqualStrings("sqlite", ast.getDatasource("catalog_db").?.driver);
-    try std.testing.expectEqual(flowdata.ast.DatasourceRole.duplex, ast.getDatasource("catalog_db").?.role);
+    try std.testing.expectEqual(parabellum.ast.DatasourceRole.duplex, ast.getDatasource("catalog_db").?.role);
 
     try std.testing.expect(ast.getDatasource("cbz_staging") != null);
     try std.testing.expectEqualStrings("file_store", ast.getDatasource("cbz_staging").?.driver);
-    try std.testing.expectEqual(flowdata.ast.DatasourceRole.sink, ast.getDatasource("cbz_staging").?.role);
+    try std.testing.expectEqual(parabellum.ast.DatasourceRole.sink, ast.getDatasource("cbz_staging").?.role);
 
     // 3. Validate declared modules
     try std.testing.expectEqual(@as(usize, 1), ast.modules.len);

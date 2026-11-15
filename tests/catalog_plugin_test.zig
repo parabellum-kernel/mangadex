@@ -1,13 +1,13 @@
 const std = @import("std");
-const abi = @import("flowdata_abi");
+const abi = @import("parabellum_abi");
 const plugin = @import("mangadex_app");
 const catalog = plugin.catalog;
 const sdk = @import("mangadex_sdk");
 
-test "Catalog plugin manifest conforms to Flowdata ABI" {
+test "Catalog plugin manifest conforms to Parabellum ABI" {
     const manifest = catalog.manifest;
 
-    try std.testing.expectEqual(abi.FLOWDATA_ABI_VERSION, manifest.abi_version);
+    try std.testing.expectEqual(abi.PARABELLUM_ABI_VERSION, manifest.abi_version);
     try std.testing.expectEqualStrings("manga_catalog", manifest.nameSlice());
     try std.testing.expectEqual(@as(u32, 1), manifest.module_version.major);
     try std.testing.expectEqual(@as(usize, 10), manifest.tasks_len);
@@ -164,7 +164,7 @@ const MockPluginHost = struct {
 
         const raw = self.allocator.create(abi.TaskContext_ABI) catch unreachable;
         raw.* = .{
-            .abi_version = abi.FLOWDATA_ABI_VERSION,
+            .abi_version = abi.PARABELLUM_ABI_VERSION,
             .opaque_host_state = self,
             .host = &Trampoline.vtable,
         };

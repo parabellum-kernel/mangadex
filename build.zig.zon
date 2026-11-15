@@ -4,10 +4,10 @@
     .minimum_zig_version = "0.17.1",
     .fingerprint = 0xfc3c71c2a137cc5b,
     .dependencies = .{
-        .flowdata_sdk = .{
+        .parabellum_sdk = .{
             .path = "../sdk",
         },
-        .flowdata_libs = .{
+        .parabellum_libs = .{
             .path = "../lib",
         },
     },

@@ -1,6 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const abi = @import("flowdata_abi");
+const abi = @import("parabellum_abi");
 const Logger = abi.Logger;
 const MangaSource = @import("../sources/mod.zig").MangaSource;
 

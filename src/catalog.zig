@@ -1,5 +1,5 @@
 const std = @import("std");
-const abi = @import("flowdata_abi");
+const abi = @import("parabellum_abi");
 
 const container = @import("container.zig");
 pub const MangaContext = container.MangaContext;

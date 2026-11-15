@@ -1,6 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const abi = @import("flowdata_abi");
+const abi = @import("parabellum_abi");
 const sdk = @import("mangadex_sdk");
 const komga_sdk = @import("komga_sdk");
 const sources = @import("sources/mod.zig");
@@ -14,10 +14,10 @@ const KomgaClient = komga_sdk.KomgaClient;
 const MangaSource = sources.MangaSource;
 const MangaDexSource = sources.MangaDexSource;
 const HtmlGenericSource = sources.HtmlGenericSource;
-const FlowdataHttpAdapter = adapters.FlowdataHttpAdapter;
-const FlowdataKomgaAdapter = adapters.FlowdataKomgaAdapter;
+const ParabellumHttpAdapter = adapters.ParabellumHttpAdapter;
+const ParabellumKomgaAdapter = adapters.ParabellumKomgaAdapter;
 
-fn createClient(alloc: Allocator, ctx: TaskContext, http_bridge: *FlowdataHttpAdapter) MangaDexClient {
+fn createClient(alloc: Allocator, ctx: TaskContext, http_bridge: *ParabellumHttpAdapter) MangaDexClient {
     var app_cfg = AppConfig.load(alloc, "configs/.env") catch AppConfig.load(alloc, ".env") catch AppConfig{};
     var interp = EnvStore.init(true);
     defer interp.deinit(alloc);
@@ -68,8 +68,8 @@ fn createClient(alloc: Allocator, ctx: TaskContext, http_bridge: *FlowdataHttpAd
 }
 
 pub const MangaContext = struct {
-    http: FlowdataHttpAdapter,
-    komga_http: FlowdataKomgaAdapter,
+    http: ParabellumHttpAdapter,
+    komga_http: ParabellumKomgaAdapter,
     mangadex_client: MangaDexClient,
     komga_client: KomgaClient,
     mangadex_driver: MangaDexSource,
@@ -77,8 +77,8 @@ pub const MangaContext = struct {
     komga_library_id: ?[]const u8 = null,
 
     pub fn init(self: *MangaContext, alloc: Allocator, ctx: TaskContext) !void {
-        self.http = FlowdataHttpAdapter.fromTaskContext(ctx);
-        self.komga_http = FlowdataKomgaAdapter.fromTaskContext(ctx);
+        self.http = ParabellumHttpAdapter.fromTaskContext(ctx);
+        self.komga_http = ParabellumKomgaAdapter.fromTaskContext(ctx);
         self.mangadex_client = createClient(alloc, ctx, &self.http);
 
         const app_cfg = AppConfig.load(alloc, "configs/.env") catch AppConfig.load(alloc, ".env") catch AppConfig{};
@@ -120,7 +120,7 @@ pub const MangaContext = struct {
         return &self.komga_client;
     }
 
-    /// @Bean Factory Method: Automatically discovered at comptime by Flowdata's DI engine
+    /// @Bean Factory Method: Automatically discovered at comptime by Parabellum's DI engine
     /// whenever a Service declares a field `source: MangaSource`.
     pub fn provideMangaSource(self: *MangaContext, input: anytype) !MangaSource {
         const candidates = [_]MangaSource{

@@ -257,12 +257,12 @@ test "UploadCbzService resolves library, scans, analyzes series and emits egress
         .auth = .{ .api_key = "test-token" },
     }, mock.httpTransport());
 
-    const flowdata = @import("flowdata");
+    const parabellum = @import("parabellum");
     const catalog = @import("mangadex_app").catalog;
 
     var service = catalog.UploadCbzService{
         .komga = &client,
-        .logger = flowdata.plugin.Logger.noop(),
+        .logger = parabellum.plugin.Logger.noop(),
         .default_library_id = "lib-1",
     };
 

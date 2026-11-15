@@ -1,6 +1,6 @@
 # MangaDex Catalog Ingestion & Synchronization Engine
 
-> High-throughput, declarative, and memory-safe manga ingestion and packaging pipeline built on **Flowdata v2**.
+> High-throughput, declarative, and memory-safe manga ingestion and packaging pipeline built on **Parabellum v2**.
 
 ---
 
@@ -8,7 +8,7 @@
 
 `apps/mangadex` synchronizes and archives manga series from the MangaDex public API into ComicRack-compliant `.cbz` archives containing Anansi `ComicInfo.xml` (v2.1) metadata.
 
-The application is orchestrated entirely via a declarative specification ([`configs/pipeline.yaml`](file:///home/ubuntu/.gemini/antigravity/scratch/vidsec/apps/mangadex/configs/pipeline.yaml)) executing on the native Flowdata v2 runtime. It features:
+The application is orchestrated entirely via a declarative specification ([`configs/pipeline.yaml`](file:///home/ubuntu/.gemini/antigravity/scratch/vidsec/apps/mangadex/configs/pipeline.yaml)) executing on the native Parabellum v2 runtime. It features:
 
 - **Type-Driven Routing & Multi-Input Joins (ARCH-023 / ARCH-024)**: Uses `routing: type_driven` so steps bind dynamically via `canHandle()` and `inputFields()` without explicit `inputs:` or `after:` wiring, including automatic Join synchronization on `build_cbz` (`pages` + `comic_info_xml`).
 - **Explicit Datasource Roles & Batch Emission (ARCH-025)**: `tracked_targets` (`role: source`) emits individual `jobItem`s in offline CLI mode through the same reactive path as collectors, while `komga_library` is enforced as `role: sink`.
@@ -78,7 +78,7 @@ flowchart TD
 ## 3. Execution Modes
 
 ### Mode 1: Interactive Job Dispatcher (`send_mangadex_job.sh`)
-When the Flowdata daemon is running in the background, send jobs directly using the lightweight CLI dispatcher without spinning up file watchers:
+When the Parabellum daemon is running in the background, send jobs directly using the lightweight CLI dispatcher without spinning up file watchers:
 
 ```bash
 # Dispatch default series (Low Orbit Human, Chapter 1)
@@ -93,7 +93,7 @@ When the Flowdata daemon is running in the background, send jobs directly using 
 ```
 
 ### Mode 2: Standalone Daemon / Server (`--serve`)
-Runs Flowdata as a persistent daemon listening for `JobEnvelope` payloads on `http://127.0.0.1:8080/v1/jobs`:
+Runs Parabellum as a persistent daemon listening for `JobEnvelope` payloads on `http://127.0.0.1:8080/v1/jobs`:
 
 ```bash
 ./run_pipeline.sh --serve
@@ -110,11 +110,11 @@ Executes the pipeline directly against static targets configured in [`configs/jo
 ./run_pipeline.sh -p configs/custom_pipeline.yaml
 ```
 
-### Mode 4: Autonomous Collector (`flowdata-collector-filewatcher`)
-Watches `configs/jobs.yaml` for modifications using inotify and streams `JobEnvelope` records asynchronously into the Flowdata engine:
+### Mode 4: Autonomous Collector (`parabellum-collector-filewatcher`)
+Watches `configs/jobs.yaml` for modifications using inotify and streams `JobEnvelope` records asynchronously into the Parabellum engine:
 
 ```bash
-flowdata-collector-filewatcher \
+parabellum-collector-filewatcher \
   --watch configs/jobs.yaml \
   --topic manga_subscription \
   --endpoint http://127.0.0.1:8080/v1/jobs

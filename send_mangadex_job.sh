@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # =============================================================================
-# send_mangadex_job.sh — Lightweight Job Dispatcher for Flowdata MangaDex
+# send_mangadex_job.sh — Lightweight Job Dispatcher for Parabellum MangaDex
 #
 # Dispatches a single manga ingestion workload (JobEnvelope) directly to a
-# running Flowdata server instance without needing to launch the inotify collector.
+# running Parabellum server instance without needing to launch the inotify collector.
 #
 # Usage:
 #   ./send_mangadex_job.sh [options]
@@ -14,7 +14,7 @@
 #   -c, --chapters <selector>  Chapter selector e.g. "1", "1..5", "latest:3" (default: "1")
 #   -l, --lang <lang>          Language code (default: "en")
 #   -L, --library <name>       Target Komga library name or ID (optional)
-#   -e, --engine <url>         Flowdata Engine endpoint (default: http://127.0.0.1:8080)
+#   -e, --engine <url>         Parabellum Engine endpoint (default: http://127.0.0.1:8080)
 #   -h, --help                 Show this help message
 #
 # Examples:
@@ -35,7 +35,7 @@ usage() {
     cat <<EOF
 Usage: ./send_mangadex_job.sh [options]
 
-Dispatches a standalone JobEnvelope directly to the Flowdata engine endpoint (/v1/jobs).
+Dispatches a standalone JobEnvelope directly to the Parabellum engine endpoint (/v1/jobs).
 
 Options:
   -s, --series-id <UUID>     MangaDex series UUID (default: $SERIES_ID)
@@ -43,7 +43,7 @@ Options:
   -c, --chapters <selector>  Chapter selector: "1", "1..4", "latest:5", "all" (default: $CHAPTERS)
   -l, --lang <lang>          Language code (default: $LANG)
   -L, --library <name>       Target Komga library name or ID (optional)
-  -e, --engine <url>         Flowdata Engine URL (default: $ENGINE_URL)
+  -e, --engine <url>         Parabellum Engine URL (default: $ENGINE_URL)
   -h, --help                 Show this help message
 EOF
     exit 0
@@ -116,7 +116,7 @@ EOF
 )
 
 echo "======================================================="
-echo " Flowdata MangaDex Job Dispatcher"
+echo " Parabellum MangaDex Job Dispatcher"
 echo "======================================================="
 echo " Target Endpoint:  ${ENGINE_URL}/v1/jobs"
 echo " Job ID:           ${JOB_ID}"

@@ -2,7 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 /// Lightweight `.env` parser and `${VAR}` / `${VAR:-default}` interpolator
-/// using only `std` (zero dependency on `flowdata` core).
+/// using only `std` (zero dependency on `parabellum` core).
 pub const EnvStore = struct {
     vars: std.StringHashMapUnmanaged([]const u8) = .{},
     use_process_env: bool = true,

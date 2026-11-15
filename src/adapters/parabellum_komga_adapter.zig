@@ -1,20 +1,20 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const abi = @import("flowdata_abi");
-const sdk = @import("mangadex_sdk");
+const abi = @import("parabellum_abi");
+const komga_sdk = @import("komga_sdk");
 
-pub const FlowdataHttpAdapter = struct {
+pub const ParabellumKomgaAdapter = struct {
     task_ctx: abi.TaskContext,
 
     comptime {
-        sdk.HttpTransport.assertImplements(@This());
+        komga_sdk.HttpTransport.assertImplements(@This());
     }
 
-    pub fn fromTaskContext(ctx: abi.TaskContext) FlowdataHttpAdapter {
+    pub fn fromTaskContext(ctx: abi.TaskContext) ParabellumKomgaAdapter {
         return .{ .task_ctx = ctx };
     }
 
-    pub fn httpTransport(self: *FlowdataHttpAdapter) sdk.HttpTransport {
+    pub fn httpTransport(self: *ParabellumKomgaAdapter) komga_sdk.HttpTransport {
         return .{
             .ptr = self,
             .vtable = &.{ .execute = executeBridge },
@@ -24,12 +24,12 @@ pub const FlowdataHttpAdapter = struct {
     fn executeBridge(
         ctx: *anyopaque,
         allocator: Allocator,
-        method: sdk.HttpMethod,
+        method: komga_sdk.HttpMethod,
         url: []const u8,
-        headers: []const sdk.HttpHeader,
+        headers: []const komga_sdk.HttpHeader,
         body: []const u8,
-    ) sdk.HttpTransportError!sdk.HttpResponse {
-        const self: *FlowdataHttpAdapter = @ptrCast(@alignCast(ctx));
+    ) komga_sdk.HttpTransportError!komga_sdk.HttpResponse {
+        const self: *ParabellumKomgaAdapter = @ptrCast(@alignCast(ctx));
         const task_ctx = self.task_ctx;
 
         var fields = std.ArrayListUnmanaged(abi.NamedField_ABI).empty;
@@ -54,20 +54,17 @@ pub const FlowdataHttpAdapter = struct {
             .headers_ptr = if (fields.items.len > 0) fields.items.ptr else null,
             .headers_len = fields.items.len,
             .body = abi.Slice_ABI.fromSlice(body),
-        }) catch |err| {
-            task_ctx.logErrorFmt("netRequest failed for {s} '{s}': {s}", .{ method.asText(), url, @errorName(err) });
-            return switch (err) {
-                error.NetworkRateLimited => error.RateLimited,
-                error.NetworkAcquireTimeout => error.Timeout,
-                error.InvalidArgument => error.InvalidUrl,
-                error.OutOfMemory => error.OutOfMemory,
-                else => error.NetworkFailure,
-            };
+        }) catch |err| return switch (err) {
+            error.NetworkRateLimited => error.RateLimited,
+            error.NetworkAcquireTimeout => error.Timeout,
+            error.InvalidArgument => error.InvalidUrl,
+            error.OutOfMemory => error.OutOfMemory,
+            else => error.NetworkFailure,
         };
 
-        task_ctx.logInfoFmt("HTTP {s} {s} => status={d} len={d}", .{ method.asText(), url, res.status_code, res.body.toSlice().len });
+        task_ctx.logInfoFmt("Komga HTTP {s} {s} => status={d} len={d}", .{ method.asText(), url, res.status_code, res.body.toSlice().len });
         if (res.status_code >= 400) {
-            task_ctx.logWarnFmt("HTTP error body: {s}", .{res.body.toSlice()});
+            task_ctx.logWarnFmt("Komga HTTP error body: {s}", .{res.body.toSlice()});
         }
 
         return .{
