@@ -12,25 +12,13 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    const lib_mangadex_dep = b.dependency("lib_mangadex", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    const lib_komga_dep = b.dependency("lib_komga", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    const lib_comicinfo_dep = b.dependency("lib_comicinfo", .{
-        .target = target,
-        .optimize = optimize,
-    });
     const flowdata_sdk_mod = sdk_dep.module("flowdata_sdk");
     _ = flowdata_sdk_mod;
     const abi_mod = sdk_dep.module("flowdata_abi");
-    const sdk_mod = lib_mangadex_dep.module("mangadex_sdk");
-    const komga_sdk_mod = lib_komga_dep.module("komga_sdk");
+    const sdk_mod = libs_dep.module("mangadex_sdk");
+    const komga_sdk_mod = libs_dep.module("komga_sdk");
     const zip_archive_mod = libs_dep.module("flowdata_zip_archive");
-    const comicinfo_mod = lib_comicinfo_dep.module("comicinfo");
+    const comicinfo_mod = libs_dep.module("comicinfo");
 
     // 3. Unified App module (`src/root.zig`: Adapters, Config, Sources, Container, Tasks, Catalog)
     const app_mod = b.addModule("mangadex_app", .{

@@ -10,15 +10,6 @@
         .flowdata_libs = .{
             .path = "../lib",
         },
-        .lib_mangadex = .{
-            .path = "../lib-mangadex",
-        },
-        .lib_komga = .{
-            .path = "../lib-komga",
-        },
-        .lib_comicinfo = .{
-            .path = "../lib-comicinfo",
-        },
     },
     .paths = .{
         "build.zig",
