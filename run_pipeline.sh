@@ -80,49 +80,54 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-BIN_PATH="$SCRIPT_DIR/zig-out/bin/mangadex"
+ENGINE_BIN="${PARABELLUM_ENGINE_BIN:-$SCRIPT_DIR/../engine/zig-out/bin/parabellum-engine}"
 LIB_DIR="$SCRIPT_DIR/zig-out/lib"
+PLUGIN_DIR="${PARABELLUM_PLUGIN_DIR:-$LIB_DIR}"
 
-# 1. Build if binaries are missing or if --build was requested
-if [[ "$DO_BUILD" == true || ! -f "$BIN_PATH" || ! -d "$LIB_DIR" ]]; then
-    echo "==> Building MangaDex binary and plugin library (zig build)..."
+# 1. Build if plugin library is missing or if --build was requested
+if [[ "$DO_BUILD" == true || ! -f "$LIB_DIR/libmanga_catalog.so" ]]; then
+    echo "==> Building MangaDex plugin library (zig build)..."
     zig build
 fi
 
 # 2. Ensure output directory structure exists for artifacts, databases, and logs
-mkdir -p "$SCRIPT_DIR/output/logs" "$SCRIPT_DIR/output/cbz"
+mkdir -p "$SCRIPT_DIR/output/logs" "$SCRIPT_DIR/output/cbz" "$LIB_DIR"
+
+# Sync built driver plugins from ../driver/zig-out/lib if available
+if [[ -d "$SCRIPT_DIR/../driver/zig-out/lib" ]]; then
+    cp -u "$SCRIPT_DIR/../driver/zig-out/lib"/*.so "$LIB_DIR/" 2>/dev/null || true
+fi
 
 # 3. Enforce secure permissions on shared libraries (.so) required by Parabellum ABI security policy
 if [[ -d "$LIB_DIR" ]]; then
     chmod 755 "$LIB_DIR"/*.so 2>/dev/null || true
 fi
 
-# 3. Verify pipeline file exists
+# 4. Verify pipeline file and engine binary exist
 if [[ ! -f "$PIPELINE_PATH" ]]; then
     echo "Error: Pipeline file '$PIPELINE_PATH' not found." >&2
     exit 1
 fi
-
-ENV_ARGS=()
-if [[ -n "$ENV_FILE" ]]; then
-    ENV_ARGS=(--env "$ENV_FILE")
+if [[ ! -x "$ENGINE_BIN" ]]; then
+    echo "Error: Engine binary '$ENGINE_BIN' not found. Build it with 'cd ../engine && zig build'." >&2
+    exit 1
 fi
 
-# 4. Dispatch selected mode
+# 5. Dispatch selected mode
 case "$MODE" in
     validate)
         echo "==> Validating pipeline '$PIPELINE_PATH'..."
-        exec "$BIN_PATH" validate --pipeline "$PIPELINE_PATH" "${ENV_ARGS[@]}" "${EXTRA_ARGS[@]}"
+        exec "$ENGINE_BIN" --plugin-dir "$PLUGIN_DIR" validate "$PIPELINE_PATH" "${EXTRA_ARGS[@]}"
         ;;
     serve)
         echo "==> Starting pipeline server with '$PIPELINE_PATH'..."
-        exec "$BIN_PATH" serve --pipeline "$PIPELINE_PATH" "${ENV_ARGS[@]}" "${EXTRA_ARGS[@]}"
+        exec "$ENGINE_BIN" --plugin-dir "$PLUGIN_DIR" --serve --pipeline "$PIPELINE_PATH" "${EXTRA_ARGS[@]}"
         ;;
     run)
         echo "==> Validating pre-flight requirements..."
-        "$BIN_PATH" validate --pipeline "$PIPELINE_PATH" "${ENV_ARGS[@]}"
+        "$ENGINE_BIN" --plugin-dir "$PLUGIN_DIR" validate "$PIPELINE_PATH"
 
         echo "==> Executing pipeline '$PIPELINE_PATH'..."
-        exec "$BIN_PATH" run --pipeline "$PIPELINE_PATH" "${ENV_ARGS[@]}" "${EXTRA_ARGS[@]}"
+        exec "$ENGINE_BIN" --plugin-dir "$PLUGIN_DIR" run "$PIPELINE_PATH" "${EXTRA_ARGS[@]}"
         ;;
 esac
