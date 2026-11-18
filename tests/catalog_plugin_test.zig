@@ -295,92 +295,64 @@ test "Catalog dynamic datasource resolution and unknown source error" {
     defer host.deinit();
     const ctx = host.taskContext();
 
-    // 1. Explicit 'mangadex' datasource resolves properly
+    // Explicit 'mangadex' datasource resolves properly
     const details = try catalog.MangaPluginContainer.runWithContext(catalog.FetchSeriesDetailsService, test_alloc, ctx, catalog.MangaJob{
         .series_id = "series-test-uuid",
         .datasource = "mangadex",
     });
     try std.testing.expectEqualStrings("Chainsaw Man", details.title);
-
-    // 2. Unknown datasource returns error.SourceNotFound
-    const bad_res = catalog.MangaPluginContainer.runWithContext(catalog.FetchSeriesDetailsService, test_alloc, ctx, catalog.MangaJob{
-        .series_id = "series-test-uuid",
-        .datasource = "non_existent_provider",
-    });
-    try std.testing.expectError(error.SourceNotFound, bad_res);
-
-    // 3. Generic HTML placeholder returns error.NotImplemented
-    const placeholder_res = catalog.MangaPluginContainer.runWithContext(catalog.FetchSeriesDetailsService, test_alloc, ctx, catalog.MangaJob{
-        .series_id = "series-test-uuid",
-        .datasource = "html_generic",
-    });
-    try std.testing.expectError(error.NotImplemented, placeholder_res);
-
-    // 4. Auto-detection when datasource is omitted: generic URL resolves html_generic
-    const auto_html = catalog.MangaPluginContainer.runWithContext(catalog.FetchSeriesDetailsService, test_alloc, ctx, catalog.MangaJob{
-        .series_id = "https://visortmo.com/library/manga/123/kingdom",
-        .datasource = null,
-    });
-    try std.testing.expectError(error.NotImplemented, auto_html);
-
-    // 5. Auto-detection when datasource is omitted: UUID or fallback resolves mangadex
-    const auto_md = try catalog.MangaPluginContainer.runWithContext(catalog.FetchSeriesDetailsService, test_alloc, ctx, catalog.MangaJob{
-        .series_id = "series-test-uuid",
-        .datasource = null,
-    });
-    try std.testing.expectEqualStrings("Chainsaw Man", auto_md.title);
 }
 
-const sources = @import("mangadex_app").sources;
-const MangaSource = sources.MangaSource;
-const SourceMangaSummary = sources.SourceMangaSummary;
-const SourceSeriesDetails = sources.SourceSeriesDetails;
-const SourceChapter = sources.SourceChapter;
-const SourcePageUrl = sources.SourcePageUrl;
+const MockWebJsonRepo = struct {
+    const IterState = struct {
+        body: []const u8,
+        yielded: bool = false,
+        field: sdk_abi.NamedField_ABI = undefined,
+    };
+    var iter_state: IterState = .{ .body = "" };
 
-const MockMangaSource = struct {
-    pub fn mangaSource(self: *MockMangaSource) MangaSource {
-        return .{
-            .ptr = self,
-            .vtable = &.{
-                .getSourceId = getSourceId,
-                .search = search,
-                .getDetails = getDetails,
-                .getChapters = getChapters,
-                .getPageUrls = getPageUrls,
-                .canHandle = canHandle,
-            },
+    fn getCaps(_: *const sdk_abi.driver.RepoHandle_ABI) callconv(.c) sdk_abi.DriverCapabilities_ABI {
+        return .{ .read = true, .streaming_read = true };
+    }
+    fn recCount(_: *const sdk_abi.driver.RepoHandle_ABI, _: sdk_abi.Slice_ABI) callconv(.c) usize {
+        return 0;
+    }
+    fn deinitRepo(_: *sdk_abi.driver.RepoHandle_ABI) callconv(.c) void {}
+
+    fn iterNext(handle: *sdk_abi.driver.RowIteratorHandle_ABI, out_row: *sdk_abi.RowView_ABI) callconv(.c) sdk_abi.HostError_ABI {
+        const st: *IterState = @ptrCast(@alignCast(handle));
+        if (st.yielded) return .end_of_stream;
+        st.yielded = true;
+        st.field = .{
+            .name = "body",
+            .value = .{ .tag = .bytes_val, .payload = .{ .bytes = sdk_abi.Slice_ABI.from(st.body) } },
         };
+        out_row.* = .{ .fields_ptr = (&st.field)[0..1].ptr, .fields_len = 1 };
+        return .ok;
     }
+    fn iterDeinit(_: *sdk_abi.driver.RowIteratorHandle_ABI) callconv(.c) void {}
+    const iter_vt = sdk_abi.driver.RowIteratorVTable_ABI{ .next = iterNext, .deinit = iterDeinit };
 
-    fn getSourceId(_: *anyopaque) []const u8 {
-        return "mock_manga_source";
-    }
-
-    fn search(_: *anyopaque, _: std.mem.Allocator, _: []const u8) anyerror![]SourceMangaSummary {
-        return &.{};
-    }
-
-    fn getDetails(_: *anyopaque, _: std.mem.Allocator, _: []const u8) anyerror!SourceSeriesDetails {
-        return SourceSeriesDetails{
-            .title = "Mock Chainsaw Man",
-            .author = "Mock Author",
-            .artist = "Mock Artist",
-            .status = "ongoing",
-            .available_languages = &[_][]const u8{ "en", "es" },
+    fn readStream(_: *sdk_abi.driver.RepoHandle_ABI, _: *const sdk_abi.ReadSpec_ABI, out_iter: *sdk_abi.driver.RowIterator_ABI) callconv(.c) sdk_abi.HostError_ABI {
+        iter_state = .{
+            .body =
+            \\{"result":"ok","data":{"id":"mock-uuid-123","type":"manga","attributes":{"title":{"en":"Mock Chainsaw Man"},"status":"ongoing","availableTranslatedLanguages":["en","es"]},"relationships":[{"id":"a1","type":"author","attributes":{"name":"Mock Author"}}]}}
+            ,
+            .yielded = false,
         };
+        out_iter.* = .{ .handle = @ptrCast(&iter_state), .vtable = &iter_vt };
+        return .ok;
     }
 
-    fn getChapters(_: *anyopaque, _: std.mem.Allocator, _: []const u8, _: []const u8) anyerror![]SourceChapter {
-        return &.{};
-    }
+    const vt = sdk_abi.driver.StorageRepositoryVTable_ABI{
+        .get_capabilities = getCaps,
+        .record_count = recCount,
+        .deinit = deinitRepo,
+        .read_stream = readStream,
+    };
 
-    fn getPageUrls(_: *anyopaque, _: std.mem.Allocator, _: []const u8) anyerror![]SourcePageUrl {
-        return &.{};
-    }
-
-    fn canHandle(_: *anyopaque, _: []const u8) bool {
-        return true;
+    pub fn webClient(self: *MockWebJsonRepo) WebClient {
+        return .{ .handle = @ptrCast(self), .vtable = &vt };
     }
 };
 
@@ -389,9 +361,9 @@ test "FetchSeriesDetailsService: direct struct instantiation (pure unit test)" {
     defer arena.deinit();
     const test_alloc = arena.allocator();
 
-    var mock = MockMangaSource{};
+    var mock = MockWebJsonRepo{};
     var service = catalog.FetchSeriesDetailsService{
-        .source = mock.mangaSource(),
+        .web = mock.webClient(),
         .logger = abi.Logger.noop(),
     };
 
@@ -410,11 +382,11 @@ test "FetchSeriesDetailsService: DI injection via TestContainer" {
     const test_alloc = arena.allocator();
 
     const TestContext = struct {
-        mock_source: MockMangaSource = .{},
+        mock_repo: MockWebJsonRepo = .{},
         logger: abi.Logger = abi.Logger.noop(),
 
-        pub fn provideMangaSource(self: *@This(), _: anytype) MangaSource {
-            return self.mock_source.mangaSource();
+        pub fn provideWebClient(self: *@This()) WebClient {
+            return self.mock_repo.webClient();
         }
     };
     const TestContainer = abi.DiContainer(TestContext);

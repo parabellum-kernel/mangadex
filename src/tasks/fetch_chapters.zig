@@ -2,7 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const abi = @import("parabellum_abi");
 const Logger = abi.Logger;
-const MangaSource = @import("../sources/mod.zig").MangaSource;
+const WebClient = @import("parabellum_sdk").WebClient;
 
 pub const FetchChaptersInputs = struct {
     series_id: []const u8,
@@ -117,7 +117,7 @@ pub fn matchesChapterFilter(ch_num: []const u8, filter: []const u8) bool {
 }
 
 pub const FetchChaptersService = struct {
-    source: MangaSource,
+    web: WebClient,
     logger: Logger,
 
     /// Only accepts `SeriesDetails`-like payloads (must carry `series_id` and `source_id` or `status`),
@@ -135,38 +135,95 @@ pub const FetchChaptersService = struct {
             const lang = std.mem.trim(u8, raw_lang, " \t\r\n");
             if (lang.len == 0) continue;
 
-            self.logger.info("Fetching chapters for series '{s}' in language '{s}' (filter: '{s}') via source '{s}'", .{
+            self.logger.info("Fetching chapters for series '{s}' in language '{s}' (filter: '{s}')", .{
                 inputs.series_id,
                 lang,
                 inputs.target_chapters,
-                self.source.getSourceId(),
             });
-            const chapters = try self.source.getChapters(alloc, inputs.series_id, lang);
-            for (chapters) |ch| {
-                if (!matchesChapterFilter(ch.chapter_number, inputs.target_chapters)) {
-                    continue;
-                }
 
-                // Avoid duplicate chapter numbers in the same language run
-                var already_exists = false;
-                for (chapters_list.items) |existing| {
-                    if (std.mem.eql(u8, existing.chapter_number, ch.chapter_number)) {
-                        already_exists = true;
-                        break;
-                    }
-                }
-                if (already_exists) continue;
-
-                try chapters_list.append(alloc, .{
-                    .source_chapter_id = ch.source_chapter_id,
-                    .series_id = inputs.series_id,
-                    .chapter_number = ch.chapter_number,
-                    .volume_number = ch.volume_number,
-                    .title = ch.title,
-                    .language = ch.language_iso,
-                    .scanlation_group = ch.scanlation_group,
-                    .page_count = ch.page_count,
+            var offset: u32 = 0;
+            const page_limit: u32 = 100;
+            while (true) {
+                const body = try self.web.fetchText(alloc, "get_manga_feed", .{
+                    .manga_id = inputs.series_id,
+                    .limit = page_limit,
+                    .offset = offset,
                 });
+                defer alloc.free(body);
+
+                const parsed = try std.json.parseFromSlice(std.json.Value, alloc, body, .{});
+                defer parsed.deinit();
+                if (parsed.value != .object) break;
+
+                const data_val = parsed.value.object.get("data") orelse break;
+                if (data_val != .array or data_val.array.items.len == 0) break;
+
+                const total: u32 = if (parsed.value.object.get("total")) |tv|
+                    (if (tv == .integer) @intCast(@max(0, tv.integer)) else 0)
+                else
+                    0;
+
+                for (data_val.array.items) |item| {
+                    if (item != .object) continue;
+                    const obj = item.object;
+                    const attrs = if (obj.get("attributes")) |a| (if (a == .object) a.object else continue) else continue;
+
+                    const t_lang = if (attrs.get("translatedLanguage")) |v| (if (v == .string) v.string else "") else "";
+                    if (!std.mem.eql(u8, t_lang, lang)) continue;
+
+                    const ch_num = if (attrs.get("chapter")) |v| (if (v == .string) v.string else "") else "";
+                    if (!matchesChapterFilter(ch_num, inputs.target_chapters)) continue;
+
+                    var already_exists = false;
+                    for (chapters_list.items) |existing| {
+                        if (std.mem.eql(u8, existing.chapter_number, ch_num)) {
+                            already_exists = true;
+                            break;
+                        }
+                    }
+                    if (already_exists) continue;
+
+                    const ch_id = if (obj.get("id")) |v| (if (v == .string) v.string else "") else "";
+                    const vol: ?[]const u8 = if (attrs.get("volume")) |v| (if (v == .string) try alloc.dupe(u8, v.string) else null) else null;
+                    const title: ?[]const u8 = if (attrs.get("title")) |v| (if (v == .string) try alloc.dupe(u8, v.string) else null) else null;
+                    const pages: u32 = if (attrs.get("pages")) |pv| (if (pv == .integer) @intCast(@max(0, pv.integer)) else 0) else 0;
+
+                    var group: ?[]const u8 = null;
+                    if (obj.get("relationships")) |rels| {
+                        if (rels == .array) {
+                            for (rels.array.items) |rel| {
+                                if (rel != .object) continue;
+                                const rtype = if (rel.object.get("type")) |v| (if (v == .string) v.string else "") else "";
+                                if (std.mem.eql(u8, rtype, "scanlation_group")) {
+                                    if (rel.object.get("attributes")) |ra| {
+                                        if (ra == .object) {
+                                            if (ra.object.get("name")) |nv| {
+                                                if (nv == .string) group = try alloc.dupe(u8, nv.string);
+                                            }
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    try chapters_list.append(alloc, .{
+                        .source_chapter_id = try alloc.dupe(u8, ch_id),
+                        .series_id = inputs.series_id,
+                        .chapter_number = try alloc.dupe(u8, ch_num),
+                        .volume_number = vol,
+                        .title = title,
+                        .language = try alloc.dupe(u8, t_lang),
+                        .scanlation_group = group,
+                        .page_count = pages,
+                    });
+                }
+
+                offset += @intCast(data_val.array.items.len);
+                if (data_val.array.items.len < page_limit or (total > 0 and offset >= total)) {
+                    break;
+                }
             }
         }
 

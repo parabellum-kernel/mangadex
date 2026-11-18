@@ -1,7 +1,6 @@
 pub const parabellum_sdk = @import("parabellum_sdk");
 pub const zip_archive = @import("zip_archive");
 pub const comicinfo = @import("comicinfo");
-pub const sources = @import("sources/mod.zig");
 pub const env = @import("env.zig");
 pub const config = @import("config.zig");
 pub const AppConfig = config.AppConfig;
