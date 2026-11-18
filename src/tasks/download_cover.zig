@@ -3,8 +3,7 @@ const Allocator = std.mem.Allocator;
 const abi = @import("parabellum_abi");
 const Logger = abi.Logger;
 const PayloadHandle_ABI = abi.PayloadHandle_ABI;
-const sdk = @import("mangadex_sdk");
-const HttpTransport = sdk.HttpTransport;
+const WebClient = @import("parabellum_sdk").WebClient;
 const CbzArchiveOutput = @import("build_cbz_archive.zig").CbzArchiveOutput;
 const DetectContentTypeService = @import("detect_content_type.zig").DetectContentTypeService;
 
@@ -34,12 +33,10 @@ fn coverExtensionForContentType(ct: []const u8) []const u8 {
     return "jpg";
 }
 
-/// Service that downloads the series cover image from `cover_url` once and emits
-/// a `CoverOutput` per built CBZ so `pipeline.yaml` can declaratively upload both
-/// series-level (`cover.{ext}`) and chapter-level (`chapter_{chapter_number}.{ext}`)
-/// local artwork to Komga.
+/// Service that downloads the series cover image from `cover_url` via `WebClient`
+/// and emits a `CoverOutput` per built CBZ.
 pub const DownloadCoverService = struct {
-    http: HttpTransport,
+    web: WebClient,
     logger: Logger,
 
     pub fn canHandle(payload: *const PayloadHandle_ABI) bool {
@@ -82,34 +79,16 @@ pub const DownloadCoverService = struct {
 
         self.logger.info("Downloading cover for series '{s}' from '{s}'", .{ series_label, cover_url });
 
-        var attempts: usize = 0;
-        const max_attempts: usize = 6;
-        const resp = while (attempts < max_attempts) : (attempts += 1) {
-            const r = self.http.execute(alloc, .GET, cover_url, &.{}, &.{}) catch |err| {
-                if (err == error.RateLimited and attempts + 1 < max_attempts) {
-                    const wait_ms = @as(u64, @intCast(attempts + 1)) * 150;
-                    var ts: std.c.timespec = .{
-                        .sec = @intCast(wait_ms / 1000),
-                        .nsec = @intCast((wait_ms % 1000) * 1000 * 1000),
-                    };
-                    _ = std.c.nanosleep(&ts, null);
-                    continue;
-                }
-                return err;
-            };
-            break r;
-        } else return error.RateLimited;
-
-        if (resp.status_code < 200 or resp.status_code >= 300 or resp.body.len == 0) {
-            self.logger.warn("Cover download failed for '{s}' (status={d}, len={d}); skipping", .{
-                series_label,
-                resp.status_code,
-                resp.body.len,
-            });
+        const body = self.web.fetchBytes(alloc, "download_bytes", .{ .url = cover_url }) catch |err| {
+            self.logger.warn("Cover download failed for '{s}': {s}; skipping", .{ series_label, @errorName(err) });
+            return &.{};
+        };
+        if (body.len == 0) {
+            alloc.free(body);
             return &.{};
         }
 
-        const content_type = DetectContentTypeService.detect(resp.body);
+        const content_type = DetectContentTypeService.detect(body);
         const ext = coverExtensionForContentType(content_type);
 
         var outputs = try alloc.alloc(CoverOutput, inputs.cbz_archive.len);
@@ -119,18 +98,11 @@ pub const DownloadCoverService = struct {
                 .series = try alloc.dupe(u8, if (cbz.series.len > 0) cbz.series else series_label),
                 .library = try alloc.dupe(u8, if (cbz.library.len > 0) cbz.library else resolved_library),
                 .chapter_number = try alloc.dupe(u8, cbz.chapter_number),
-                .ext = ext,
-                .data = resp.body,
+                .ext = try alloc.dupe(u8, ext),
+                .data = try alloc.dupe(u8, body),
             };
         }
-
-        self.logger.info("Downloaded cover ({s}, {d} bytes) for '{s}/{s}' ({d} chapter(s))", .{
-            content_type,
-            resp.body.len,
-            resolved_library,
-            series_label,
-            outputs.len,
-        });
+        alloc.free(body);
 
         return outputs;
     }

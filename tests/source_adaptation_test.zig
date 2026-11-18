@@ -1,182 +1,148 @@
 const std = @import("std");
-const sdk = @import("mangadex_sdk");
+const sdk_abi = @import("parabellum_sdk").abi;
+const WebClient = @import("parabellum_sdk").WebClient;
 const sources = @import("mangadex_app").sources;
 const MangaSource = sources.MangaSource;
 const MangaDexSource = sources.MangaDexSource;
-const MangaDexClient = sdk.MangaDexClient;
-const HttpTransport = sdk.HttpTransport;
-const HttpMethod = sdk.HttpMethod;
-const HttpHeader = sdk.HttpHeader;
-const HttpResponse = sdk.HttpResponse;
-const HttpTransportError = sdk.HttpTransportError;
 
-const MockSourceTransport = struct {
-    pub fn httpTransport(self: *MockSourceTransport) HttpTransport {
-        return .{
-            .ptr = self,
-            .vtable = &.{ .execute = executeBridge },
+const MockSourceRepo = struct {
+    const IterState = struct {
+        body: []const u8,
+        yielded: bool = false,
+        field: sdk_abi.NamedField_ABI = undefined,
+    };
+    var iter_state: IterState = .{ .body = "" };
+
+    fn getCaps(_: *const sdk_abi.driver.RepoHandle_ABI) callconv(.c) sdk_abi.DriverCapabilities_ABI {
+        return .{ .read = true, .streaming_read = true };
+    }
+    fn recCount(_: *const sdk_abi.driver.RepoHandle_ABI, _: sdk_abi.Slice_ABI) callconv(.c) usize {
+        return 0;
+    }
+    fn deinitRepo(_: *sdk_abi.driver.RepoHandle_ABI) callconv(.c) void {}
+
+    fn iterNext(handle: *sdk_abi.driver.RowIteratorHandle_ABI, out_row: *sdk_abi.RowView_ABI) callconv(.c) sdk_abi.HostError_ABI {
+        const st: *IterState = @ptrCast(@alignCast(handle));
+        if (st.yielded) return .end_of_stream;
+        st.yielded = true;
+        st.field = .{
+            .name = "body",
+            .value = .{ .tag = .bytes_val, .payload = .{ .bytes = sdk_abi.Slice_ABI.from(st.body) } },
         };
+        out_row.* = .{ .fields_ptr = (&st.field)[0..1].ptr, .fields_len = 1 };
+        return .ok;
+    }
+    fn iterDeinit(_: *sdk_abi.driver.RowIteratorHandle_ABI) callconv(.c) void {}
+    const iter_vt = sdk_abi.driver.RowIteratorVTable_ABI{ .next = iterNext, .deinit = iterDeinit };
+
+    fn readStream(_: *sdk_abi.driver.RepoHandle_ABI, spec: *const sdk_abi.ReadSpec_ABI, out_iter: *sdk_abi.driver.RowIterator_ABI) callconv(.c) sdk_abi.HostError_ABI {
+        const ep = spec.table.toSlice();
+        const body: []const u8 = if (std.mem.eql(u8, ep, "get_manga_feed"))
+            \\{
+            \\  "result": "ok",
+            \\  "data": [
+            \\    {
+            \\      "id": "ch-101",
+            \\      "type": "chapter",
+            \\      "attributes": {
+            \\        "chapter": "1",
+            \\        "volume": "1",
+            \\        "title": "Chapter One",
+            \\        "translatedLanguage": "en",
+            \\        "pages": 12
+            \\      },
+            \\      "relationships": [
+            \\        {
+            \\          "id": "group-1",
+            \\          "type": "scanlation_group",
+            \\          "attributes": { "name": "SpeedScans" }
+            \\        }
+            \\      ]
+            \\    },
+            \\    {
+            \\      "id": "ch-102",
+            \\      "type": "chapter",
+            \\      "attributes": {
+            \\        "chapter": "1",
+            \\        "volume": "1",
+            \\        "title": "Capitulo Uno",
+            \\        "translatedLanguage": "es-la",
+            \\        "pages": 12
+            \\      },
+            \\      "relationships": [
+            \\        {
+            \\          "id": "group-1",
+            \\          "type": "scanlation_group",
+            \\          "attributes": { "name": "SpeedScans" }
+            \\        }
+            \\      ]
+            \\    }
+            \\  ]
+            \\}
+        else if (std.mem.eql(u8, ep, "get_manga"))
+            \\{
+            \\  "result": "ok",
+            \\  "data": {
+            \\    "id": "series-123",
+            \\    "type": "manga",
+            \\    "attributes": {
+            \\      "title": { "en": "Grand Blue Dreaming" },
+            \\      "altTitles": [{ "ja": "ぐらんぶる" }],
+            \\      "availableTranslatedLanguages": ["en", "es-la", "fr"],
+            \\      "description": { "en": "Diving manga" },
+            \\      "status": "ongoing",
+            \\      "year": 2014
+            \\    },
+            \\    "relationships": [
+            \\      { "id": "a1", "type": "author", "attributes": { "name": "Inoue Kenji" } },
+            \\      { "id": "a2", "type": "artist", "attributes": { "name": "Yoshioka Kimitake" } },
+            \\      { "id": "c1", "type": "cover_art", "attributes": { "fileName": "cover.jpg" } }
+            \\    ]
+            \\  }
+            \\}
+        else if (std.mem.eql(u8, ep, "search_manga"))
+            \\{
+            \\  "result": "ok",
+            \\  "data": [
+            \\    {
+            \\      "id": "series-123",
+            \\      "type": "manga",
+            \\      "attributes": { "title": { "en": "Grand Blue Dreaming" } },
+            \\      "relationships": []
+            \\    }
+            \\  ]
+            \\}
+        else
+            \\{
+            \\  "result": "ok",
+            \\  "baseUrl": "https://athome.mangadex.network",
+            \\  "chapter": {
+            \\    "hash": "hash101",
+            \\    "data": ["01.png", "02.png"]
+            \\  }
+            \\}
+        ;
+        iter_state = .{ .body = body, .yielded = false };
+        out_iter.* = .{ .handle = @ptrCast(&iter_state), .vtable = &iter_vt };
+        return .ok;
     }
 
-    fn executeBridge(
-        _: *anyopaque,
-        _: std.mem.Allocator,
-        _: HttpMethod,
-        url: []const u8,
-        _: []const HttpHeader,
-        _: []const u8,
-    ) HttpTransportError!HttpResponse {
-        if (std.mem.indexOf(u8, url, "/manga/series-123/feed") != null) {
-            const is_spanish = std.mem.indexOf(u8, url, "translatedLanguage[]=es-la") != null;
-            if (is_spanish) {
-                return .{
-                    .status_code = 200,
-                    .body =
-                        \\{
-                        \\  "result": "ok",
-                        \\  "data": [
-                        \\    {
-                        \\      "id": "ch-101",
-                        \\      "type": "chapter",
-                        \\      "attributes": {
-                        \\        "chapter": "1",
-                        \\        "volume": "1",
-                        \\        "title": "Capitulo Uno",
-                        \\        "translatedLanguage": "es-la"
-                        \\      },
-                        \\      "relationships": [
-                        \\        {
-                        \\          "id": "group-1",
-                        \\          "type": "scanlation_group",
-                        \\          "attributes": { "name": "SpeedScans" }
-                        \\        }
-                        \\      ]
-                        \\    }
-                        \\  ]
-                        \\}
-                    ,
-                };
-            }
+    const vt = sdk_abi.driver.StorageRepositoryVTable_ABI{
+        .get_capabilities = getCaps,
+        .record_count = recCount,
+        .deinit = deinitRepo,
+        .read_stream = readStream,
+    };
 
-            return .{
-                .status_code = 200,
-                .body =
-                    \\{
-                    \\  "result": "ok",
-                    \\  "data": [
-                    \\    {
-                    \\      "id": "ch-101",
-                    \\      "type": "chapter",
-                    \\      "attributes": {
-                    \\        "chapter": "1",
-                    \\        "volume": "1",
-                    \\        "title": "Chapter One",
-                    \\        "translatedLanguage": "en"
-                    \\      },
-                    \\      "relationships": [
-                    \\        {
-                    \\          "id": "group-1",
-                    \\          "type": "scanlation_group",
-                    \\          "attributes": { "name": "SpeedScans" }
-                    \\        }
-                    \\      ]
-                    \\    }
-                    \\  ]
-                    \\}
-                ,
-            };
-        }
-
-        if (std.mem.indexOf(u8, url, "/manga/series-123") != null) {
-            return .{
-                .status_code = 200,
-                .body =
-                    \\{
-                    \\  "result": "ok",
-                    \\  "data": {
-                    \\    "id": "series-123",
-                    \\    "type": "manga",
-                    \\    "attributes": {
-                    \\      "title": { "en": "Grand Blue Dreaming" },
-                    \\      "description": { "en": "A college comedy about diving and drinking." },
-                    \\      "availableTranslatedLanguages": ["en", "es-la", "es"],
-                    \\      "status": "ongoing",
-                    \\      "year": 2014
-                    \\    },
-                    \\    "relationships": [
-                    \\      {
-                    \\        "id": "auth-1",
-                    \\        "type": "author",
-                    \\        "attributes": { "name": "Inoue Kenji" }
-                    \\      },
-                    \\      {
-                    \\        "id": "art-1",
-                    \\        "type": "artist",
-                    \\        "attributes": { "name": "Yoshioka Kimitake" }
-                    \\      }
-                    \\    ]
-                    \\  }
-                    \\}
-                ,
-            };
-        }
-
-        if (std.mem.indexOf(u8, url, "/at-home/server/ch-101") != null) {
-            return .{
-                .status_code = 200,
-                .body =
-                    \\{
-                    \\  "result": "ok",
-                    \\  "baseUrl": "https://athome.mangadex.network",
-                    \\  "chapter": {
-                    \\    "hash": "hash101",
-                    \\    "data": ["01.png", "02.png"]
-                    \\  }
-                    \\}
-                ,
-            };
-        }
-
-        if (std.mem.indexOf(u8, url, "/manga") != null) {
-            return .{
-                .status_code = 200,
-                .body =
-                    \\{
-                    \\  "result": "ok",
-                    \\  "data": [
-                    \\    {
-                    \\      "id": "series-123",
-                    \\      "type": "manga",
-                    \\      "attributes": {
-                    \\        "title": { "en": "Grand Blue Dreaming", "es-la": "Gran Azul" }
-                    \\      },
-                    \\      "relationships": []
-                    \\    }
-                    \\  ]
-                    \\}
-                ,
-            };
-        }
-
-        return .{
-            .status_code = 404,
-            .body = "{\"result\":\"error\"}",
-        };
+    pub fn webClient(self: *MockSourceRepo) WebClient {
+        return .{ .handle = @ptrCast(self), .vtable = &vt };
     }
 };
 
-test "MangaDexSource conforms to MangaSource interface and translates methods" {
+test "MangaDexSource adapts WebClient JSON responses to MangaSource" {
     const allocator = std.testing.allocator;
-    var mock = MockSourceTransport{};
-
-    var client = MangaDexClient.init(
-        allocator,
-        .{},
-        mock.httpTransport(),
-        null,
-    );
-
-    var md_source = MangaDexSource.init(&client);
+    var mock = MockSourceRepo{};
+    var md_source = MangaDexSource.init(mock.webClient());
     const source: MangaSource = md_source.mangaSource();
 
     // 1. Source ID
@@ -214,7 +180,6 @@ test "MangaDexSource conforms to MangaSource interface and translates methods" {
     try std.testing.expectEqualStrings("Inoue Kenji", details.author.?);
     try std.testing.expectEqualStrings("Yoshioka Kimitake", details.artist.?);
     try std.testing.expectEqual(@as(?u16, 2014), details.year);
-    // Verifies that MangaDex's available languages list is exposed to the task
     try std.testing.expectEqual(@as(usize, 3), details.available_languages.len);
     try std.testing.expectEqualStrings("es-la", details.available_languages[1]);
 
@@ -251,19 +216,10 @@ test "MangaDexSource conforms to MangaSource interface and translates methods" {
 
 test "Plugin task inspects available languages and requests chapters in target language (e.g. Spanish es-la)" {
     const allocator = std.testing.allocator;
-    var mock = MockSourceTransport{};
-
-    var client = MangaDexClient.init(
-        allocator,
-        .{},
-        mock.httpTransport(),
-        null,
-    );
-
-    var md_source = MangaDexSource.init(&client);
+    var mock = MockSourceRepo{};
+    var md_source = MangaDexSource.init(mock.webClient());
     const source: MangaSource = md_source.mangaSource();
 
-    // 1. Task inspects details to discover available languages
     const details = try source.getDetails(allocator, "series-123");
     defer {
         allocator.free(details.title);
@@ -287,7 +243,6 @@ test "Plugin task inspects available languages and requests chapters in target l
     }
     try std.testing.expect(has_spanish);
 
-    // 2. Task requests chapters specifically in Spanish ("es-la")
     const spanish_chapters = try source.getChapters(allocator, "series-123", "es-la");
     defer {
         for (spanish_chapters) |ch| {

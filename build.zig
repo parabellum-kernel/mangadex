@@ -13,14 +13,11 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     const parabellum_sdk_mod = sdk_dep.module("parabellum_sdk");
-    _ = parabellum_sdk_mod;
     const abi_mod = sdk_dep.module("parabellum_abi");
-    const sdk_mod = libs_dep.module("mangadex_sdk");
-    const komga_sdk_mod = libs_dep.module("komga_sdk");
     const zip_archive_mod = libs_dep.module("parabellum_zip_archive");
     const comicinfo_mod = libs_dep.module("comicinfo");
 
-    // 3. Unified App module (`src/root.zig`: Adapters, Config, Sources, Container, Tasks, Catalog)
+    // 3. Unified App module (`src/root.zig`: Config, Sources, Container, Tasks, Catalog)
     const app_mod = b.addModule("mangadex_app", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
@@ -28,8 +25,7 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
     app_mod.addImport("parabellum_abi", abi_mod);
-    app_mod.addImport("mangadex_sdk", sdk_mod);
-    app_mod.addImport("komga_sdk", komga_sdk_mod);
+    app_mod.addImport("parabellum_sdk", parabellum_sdk_mod);
     app_mod.addImport("zip_archive", zip_archive_mod);
     app_mod.addImport("comicinfo", comicinfo_mod);
 
@@ -58,9 +54,8 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
     tests_mod.addImport("parabellum_abi", abi_mod);
+    tests_mod.addImport("parabellum_sdk", parabellum_sdk_mod);
     tests_mod.addImport("mangadex_app", app_mod);
-    tests_mod.addImport("mangadex_sdk", sdk_mod);
-    tests_mod.addImport("komga_sdk", komga_sdk_mod);
     tests_mod.addImport("zip_archive", zip_archive_mod);
     tests_mod.addImport("comicinfo", comicinfo_mod);
 

@@ -2,9 +2,12 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const abi = @import("parabellum_abi");
 const Logger = abi.Logger;
-const komga_sdk = @import("komga_sdk");
-const KomgaClient = komga_sdk.KomgaClient;
+const WebClient = @import("parabellum_sdk").WebClient;
 const CbzArchiveOutput = @import("build_cbz_archive.zig").CbzArchiveOutput;
+
+pub const KomgaWebClient = struct {
+    web: WebClient,
+};
 
 pub const UploadCbzInputs = struct {
     cbz_archive: []const CbzArchiveOutput,
@@ -27,7 +30,18 @@ pub const EgressDeliveryRecord = struct {
     details: ?[]const u8 = null,
 };
 
-fn findLibraryId(libs: []const komga_sdk.LibraryDto, target: ?[]const u8) ?[]const u8 {
+const LibraryDto = struct {
+    id: []const u8,
+    name: []const u8,
+};
+
+const SeriesPageDto = struct {
+    content: []const struct {
+        id: []const u8,
+    } = &.{},
+};
+
+fn findLibraryId(libs: []const LibraryDto, target: ?[]const u8) ?[]const u8 {
     if (libs.len == 0) return null;
     if (target) |t| {
         if (t.len > 0) {
@@ -41,10 +55,10 @@ fn findLibraryId(libs: []const komga_sdk.LibraryDto, target: ?[]const u8) ?[]con
     return libs[0].id;
 }
 
-/// Service that synchronizes uploaded CBZ archives with a remote Komga server over HTTP
-/// (library resolution, library scan, series analysis, and egress_history audit output).
+/// Service that synchronizes uploaded CBZ archives with a remote Komga server via `KomgaWebClient`
+/// (`driver: rest_api` backed by `configs/api.komga.yaml`).
 pub const UploadCbzService = struct {
-    komga: *KomgaClient,
+    komga: KomgaWebClient,
     logger: Logger,
     default_library_id: ?[]const u8 = null,
 
@@ -83,7 +97,12 @@ pub const UploadCbzService = struct {
         };
 
         // 1. Resolve target Komga library ID
-        var libs_parsed = try self.komga.listLibraries();
+        const libs_json = try self.komga.web.fetchText(alloc, "list_libraries", .{});
+        defer alloc.free(libs_json);
+
+        const libs_parsed = try std.json.parseFromSlice([]const LibraryDto, alloc, libs_json, .{
+            .ignore_unknown_fields = true,
+        });
         defer libs_parsed.deinit();
 
         const library_id = findLibraryId(libs_parsed.value, requested_lib) orelse return error.KomgaLibraryNotFound;
@@ -96,14 +115,17 @@ pub const UploadCbzService = struct {
             return error.InvalidScanMode;
         }
 
-        // 2. Scan library so Komga discovers newly uploaded CBZ files (unless scan_mode == "none")
+        // 2. Scan library so Komga discovers newly uploaded CBZ files
         if (!is_none) {
             self.logger.info("Triggering Komga library scan (library_id={s}, scan_mode={s}) for series '{s}'", .{
                 library_id,
                 inputs.scan_mode,
                 series_name,
             });
-            try self.komga.scanLibrary(library_id, is_deep);
+            try self.komga.web.send(void, alloc, "scan_library", .{
+                .library_id = library_id,
+                .deep = if (is_deep) "true" else "false",
+            }, "");
         } else {
             self.logger.info("Skipping Komga library scan (scan_mode=none) for series '{s}'", .{series_name});
         }
@@ -111,20 +133,27 @@ pub const UploadCbzService = struct {
         // 3. Optionally locate the series and trigger analysis
         var komga_series_id: ?[]const u8 = null;
         if (series_name.len > 0) {
-            if (self.komga.searchSeries(series_name, library_id)) |*search_res_const| {
-                var search_res = search_res_const.*;
-                defer search_res.deinit();
-                if (search_res.value.content.len > 0) {
-                    komga_series_id = try alloc.dupe(u8, search_res.value.content[0].id);
-                    if (inputs.analyze_series) {
-                        self.komga.analyzeSeries(komga_series_id.?) catch |err| {
-                            self.logger.warn("Komga analyzeSeries failed for '{s}': {s}", .{
-                                komga_series_id.?,
-                                @errorName(err),
-                            });
-                        };
+            if (self.komga.web.fetchText(alloc, "search_series", .{
+                .search = series_name,
+                .library_id = library_id,
+            })) |search_json| {
+                defer alloc.free(search_json);
+                if (std.json.parseFromSlice(SeriesPageDto, alloc, search_json, .{ .ignore_unknown_fields = true })) |sp| {
+                    defer sp.deinit();
+                    if (sp.value.content.len > 0) {
+                        komga_series_id = try alloc.dupe(u8, sp.value.content[0].id);
+                        if (inputs.analyze_series) {
+                            self.komga.web.send(void, alloc, "analyze_series", .{
+                                .series_id = komga_series_id.?,
+                            }, "") catch |err| {
+                                self.logger.warn("Komga analyzeSeries failed for '{s}': {s}", .{
+                                    komga_series_id.?,
+                                    @errorName(err),
+                                });
+                            };
+                        }
                     }
-                }
+                } else |_| {}
             } else |err| {
                 self.logger.warn("Komga searchSeries failed for '{s}': {s}", .{
                     series_name,
@@ -148,16 +177,15 @@ pub const UploadCbzService = struct {
             const details = try std.fmt.allocPrint(alloc, "library={s} file={s} bytes={d}", .{
                 library_id,
                 cbz.filename,
-                cbz.file_size_bytes,
+                cbz.data.len,
             });
-
             records[idx] = .{
                 .id = rec_id,
                 .source_chapter_id = chapter_ref,
                 .target = "komga",
-                .external_book_id = komga_series_id,
+                .external_book_id = if (komga_series_id) |kid| try alloc.dupe(u8, kid) else null,
                 .delivered_at = now_sec,
-                .status = "success",
+                .status = "delivered",
                 .details = details,
             };
         }
@@ -165,4 +193,3 @@ pub const UploadCbzService = struct {
         return records;
     }
 };
-

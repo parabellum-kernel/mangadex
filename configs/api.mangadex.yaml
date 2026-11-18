@@ -1,0 +1,47 @@
+version: 2
+id: mangadex_api
+base_url: "https://api.mangadex.org"
+network: mangadex_api
+headers:
+  Accept: "application/json"
+
+endpoints:
+  search_manga:
+    method: GET
+    path: "/manga"
+    query:
+      title: "{title}"
+      limit: "{limit:-20}"
+      "includes[0]": "cover_art"
+      "includes[1]": "author"
+      "includes[2]": "artist"
+    response: text
+
+  get_manga:
+    method: GET
+    path: "/manga/{manga_id}"
+    query:
+      "includes[0]": "cover_art"
+      "includes[1]": "author"
+      "includes[2]": "artist"
+    response: text
+
+  get_manga_feed:
+    method: GET
+    path: "/manga/{manga_id}/feed"
+    query:
+      limit: "{limit:-100}"
+      offset: "{offset:-0}"
+      "order[chapter]": "asc"
+      "includes[0]": "scanlation_group"
+    response: text
+
+  get_at_home_server:
+    method: GET
+    path: "/at-home/server/{chapter_id}"
+    response: text
+
+  download_bytes:
+    method: GET
+    path: "{url}"
+    response: bytes

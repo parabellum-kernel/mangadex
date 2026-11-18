@@ -51,6 +51,20 @@ datasources:
     identity_file: "${KOMGA_SSH_KEY:-}"
     directory: "${KOMGA_SSH_DIR:-/data/komga}"
 
+  # 6. Declarative MangaDex REST API datasource (replaces mangadex_sdk)
+  mangadex_api:
+    driver: rest_api
+    role: source
+    network: mangadex_api
+    spec: "./configs/api.mangadex.yaml#mangadex_api"
+
+  # 7. Declarative Komga REST API datasource (replaces komga_sdk)
+  komga_api:
+    driver: rest_api
+    role: duplex
+    network: komga_api
+    spec: "./configs/api.komga.yaml#komga_api"
+
 networks:
   # Isolated egress virtual network adapter with ACL rules, token-bucket rate limiter,
   # and declarative environment-driven headers (interpolated from .env / host environment).

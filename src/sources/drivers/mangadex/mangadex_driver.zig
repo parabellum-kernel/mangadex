@@ -6,35 +6,39 @@ const SourceMangaSummary = contract.SourceMangaSummary;
 const SourceSeriesDetails = contract.SourceSeriesDetails;
 const SourceChapter = contract.SourceChapter;
 const SourcePageUrl = contract.SourcePageUrl;
-const sdk = @import("mangadex_sdk");
-const MangaDexClient = sdk.MangaDexClient;
-const RelationshipType = sdk.RelationshipType;
-const SortOrder = sdk.SortOrder;
-const buildPageUrl = sdk.buildPageUrl;
-const buildCoverUrl = sdk.buildCoverUrl;
+const WebClient = @import("parabellum_sdk").WebClient;
 
 const source_id = "mangadex";
 const mangadex_host = "mangadex.org";
 const default_title = "Untitled";
 const default_status = "ongoing";
-const manga_includes = [_][]const u8{
-    RelationshipType.cover_art.asStr(),
-    RelationshipType.author.asStr(),
-    RelationshipType.artist.asStr(),
-};
-const chapter_includes = [_][]const u8{
-    RelationshipType.scanlation_group.asStr(),
-};
+
+fn extractLocalizedString(val: std.json.Value) ?[]const u8 {
+    if (val != .object) return null;
+    if (val.object.get("en")) |en| {
+        if (en == .string and en.string.len > 0) return en.string;
+    }
+    var it = val.object.iterator();
+    while (it.next()) |e| {
+        if (e.value_ptr.* == .string and e.value_ptr.*.string.len > 0) return e.value_ptr.*.string;
+    }
+    return null;
+}
+
+fn getAttrString(obj: std.json.ObjectMap, key: []const u8) ?[]const u8 {
+    const v = obj.get(key) orelse return null;
+    return if (v == .string) v.string else null;
+}
 
 pub const MangaDexSource = struct {
-    client: *MangaDexClient,
+    web: WebClient,
 
     comptime {
         MangaSource.assertImplements(@This());
     }
 
-    pub fn init(client: *MangaDexClient) MangaDexSource {
-        return .{ .client = client };
+    pub fn init(web: WebClient) MangaDexSource {
+        return .{ .web = web };
     }
 
     pub fn mangaSource(self: *MangaDexSource) MangaSource {
@@ -70,133 +74,143 @@ pub const MangaDexSource = struct {
 
     fn searchBridge(ctx: *anyopaque, allocator: Allocator, query: []const u8) anyerror![]SourceMangaSummary {
         const self: *MangaDexSource = @ptrCast(@alignCast(ctx));
-        var res = try self.client.searchManga(.{
+        const body = try self.web.fetchText(allocator, "search_manga", .{
             .title = query,
-            .limit = 20,
-            .includes = &manga_includes,
+            .limit = @as(u64, 20),
         });
-        defer res.deinit();
+        defer allocator.free(body);
 
-        var list = try allocator.alloc(SourceMangaSummary, res.items.len);
-        errdefer {
-            for (list) |*item| {
-                if (item.source_series_id.len > 0) allocator.free(item.source_series_id);
-                if (item.title.len > 0) allocator.free(item.title);
-                if (item.cover_url) |c| allocator.free(c);
-            }
-            allocator.free(list);
-        }
+        const parsed = try std.json.parseFromSlice(std.json.Value, allocator, body, .{});
+        defer parsed.deinit();
+        if (parsed.value != .object) return &.{};
+        const data_val = parsed.value.object.get("data") orelse return &.{};
+        if (data_val != .array) return &.{};
 
-        for (res.items, 0..) |item, idx| {
-            const canonical_title = item.attributes.title.getPrimary() orelse default_title;
-            const owned_id = try allocator.dupe(u8, item.id);
-            const owned_title = try allocator.dupe(u8, canonical_title);
+        var list = try allocator.alloc(SourceMangaSummary, data_val.array.items.len);
+        for (data_val.array.items, 0..) |item, idx| {
+            const obj = item.object;
+            const id = getAttrString(obj, "id") orelse "";
+            const attrs = if (obj.get("attributes")) |a| (if (a == .object) a.object else null) else null;
+            const title_str = if (attrs) |a| (if (a.get("title")) |t| extractLocalizedString(t) else null) else null;
 
             var cover_url: ?[]const u8 = null;
-            for (item.relationships) |rel| {
-                if (rel.kind() == .cover_art) {
-                    if (rel.attrString(.fileName)) |fn_str| {
-                        cover_url = buildCoverUrl(allocator, item.id, fn_str, .medium_512) catch null;
+            if (obj.get("relationships")) |rels| {
+                if (rels == .array) {
+                    for (rels.array.items) |rel| {
+                        if (rel != .object) continue;
+                        const rtype = getAttrString(rel.object, "type") orelse continue;
+                        if (std.mem.eql(u8, rtype, "cover_art")) {
+                            if (rel.object.get("attributes")) |ra| {
+                                if (ra == .object) {
+                                    if (getAttrString(ra.object, "fileName")) |fn_str| {
+                                        cover_url = std.fmt.allocPrint(allocator, "https://uploads.mangadex.org/covers/{s}/{s}.512.jpg", .{ id, fn_str }) catch null;
+                                    }
+                                }
+                            }
+                            break;
+                        }
                     }
-                    break;
                 }
             }
 
             list[idx] = .{
                 .source_id = source_id,
-                .source_series_id = owned_id,
-                .title = owned_title,
+                .source_series_id = try allocator.dupe(u8, id),
+                .title = try allocator.dupe(u8, title_str orelse default_title),
                 .cover_url = cover_url,
             };
         }
-
         return list;
     }
 
     fn getDetailsBridge(ctx: *anyopaque, allocator: Allocator, source_series_id: []const u8) anyerror!SourceSeriesDetails {
         const self: *MangaDexSource = @ptrCast(@alignCast(ctx));
-        var res = try self.client.getManga(source_series_id, &manga_includes);
-        defer res.deinit();
+        const body = try self.web.fetchText(allocator, "get_manga", .{
+            .manga_id = source_series_id,
+        });
+        defer allocator.free(body);
 
-        const item = res.data;
-        const title = try allocator.dupe(u8, item.attributes.title.getPrimary() orelse default_title);
-        errdefer allocator.free(title);
+        const parsed = try std.json.parseFromSlice(std.json.Value, allocator, body, .{});
+        defer parsed.deinit();
+        if (parsed.value != .object) return error.InvalidMangaResponse;
+        const data_val = parsed.value.object.get("data") orelse return error.InvalidMangaResponse;
+        if (data_val != .object) return error.InvalidMangaResponse;
+
+        const obj = data_val.object;
+        const id = getAttrString(obj, "id") orelse source_series_id;
+        const attrs = (obj.get("attributes") orelse return error.InvalidMangaResponse).object;
+
+        const title = try allocator.dupe(u8, (if (attrs.get("title")) |t| extractLocalizedString(t) else null) orelse default_title);
 
         var alt_list: std.ArrayListUnmanaged([]const u8) = .empty;
-        errdefer {
-            for (alt_list.items) |a| allocator.free(a);
-            alt_list.deinit(allocator);
-        }
-
-        for (item.attributes.altTitles) |alt_map| {
-            if (alt_map.raw == .object) {
-                var it = alt_map.raw.object.iterator();
-                while (it.next()) |entry| {
-                    if (entry.value_ptr.* == .string) {
-                        const alt_str = try allocator.dupe(u8, entry.value_ptr.*.string);
-                        try alt_list.append(allocator, alt_str);
+        if (attrs.get("altTitles")) |alts| {
+            if (alts == .array) {
+                for (alts.array.items) |am| {
+                    if (am == .object) {
+                        var it = am.object.iterator();
+                        while (it.next()) |e| {
+                            if (e.value_ptr.* == .string) {
+                                try alt_list.append(allocator, try allocator.dupe(u8, e.value_ptr.*.string));
+                            }
+                        }
                     }
                 }
             }
         }
-        const owned_alt_titles = try alt_list.toOwnedSlice(allocator);
-        errdefer {
-            for (owned_alt_titles) |a| allocator.free(a);
-            allocator.free(owned_alt_titles);
-        }
 
-        var lang_list = try allocator.alloc([]const u8, item.attributes.availableTranslatedLanguages.len);
-        errdefer {
-            for (lang_list) |l| allocator.free(l);
-            allocator.free(lang_list);
-        }
-        for (item.attributes.availableTranslatedLanguages, 0..) |l, i| {
-            lang_list[i] = try allocator.dupe(u8, l);
-        }
-        errdefer {
-            for (lang_list) |l| allocator.free(l);
-            allocator.free(lang_list);
-        }
-
-        var summary: ?[]const u8 = null;
-        if (item.attributes.description) |desc| {
-            if (desc.getPrimary()) |s| {
-                summary = try allocator.dupe(u8, s);
+        var lang_list: std.ArrayListUnmanaged([]const u8) = .empty;
+        if (attrs.get("availableTranslatedLanguages")) |langs| {
+            if (langs == .array) {
+                for (langs.array.items) |l| {
+                    if (l == .string) {
+                        try lang_list.append(allocator, try allocator.dupe(u8, l.string));
+                    }
+                }
             }
         }
-        errdefer if (summary) |s| allocator.free(s);
 
-        const status = try allocator.dupe(u8, item.attributes.status orelse default_status);
-        errdefer allocator.free(status);
+        const summary: ?[]const u8 = if (attrs.get("description")) |d|
+            (if (extractLocalizedString(d)) |s| try allocator.dupe(u8, s) else null)
+        else
+            null;
+
+        const status = try allocator.dupe(u8, getAttrString(attrs, "status") orelse default_status);
+        const year: ?u16 = if (attrs.get("year")) |y| (if (y == .integer) @intCast(@max(0, y.integer)) else null) else null;
 
         var author: ?[]const u8 = null;
         var artist: ?[]const u8 = null;
         var cover_url: ?[]const u8 = null;
 
-        for (item.relationships) |rel| {
-            switch (rel.kind() orelse continue) {
-                .author => if (rel.attrString(.name)) |s| {
-                    author = try allocator.dupe(u8, s);
-                },
-                .artist => if (rel.attrString(.name)) |s| {
-                    artist = try allocator.dupe(u8, s);
-                },
-                .cover_art => if (rel.attrString(.fileName)) |fn_str| {
-                    cover_url = buildCoverUrl(allocator, item.id, fn_str, .original) catch null;
-                },
-                else => {},
+        if (obj.get("relationships")) |rels| {
+            if (rels == .array) {
+                for (rels.array.items) |rel| {
+                    if (rel != .object) continue;
+                    const rtype = getAttrString(rel.object, "type") orelse continue;
+                    const ra = if (rel.object.get("attributes")) |a| (if (a == .object) a.object else null) else null;
+                    if (ra == null) continue;
+
+                    if (std.mem.eql(u8, rtype, "author")) {
+                        if (getAttrString(ra.?, "name")) |s| author = try allocator.dupe(u8, s);
+                    } else if (std.mem.eql(u8, rtype, "artist")) {
+                        if (getAttrString(ra.?, "name")) |s| artist = try allocator.dupe(u8, s);
+                    } else if (std.mem.eql(u8, rtype, "cover_art")) {
+                        if (getAttrString(ra.?, "fileName")) |fn_str| {
+                            cover_url = std.fmt.allocPrint(allocator, "https://uploads.mangadex.org/covers/{s}/{s}", .{ id, fn_str }) catch null;
+                        }
+                    }
+                }
             }
         }
 
         return .{
             .title = title,
-            .alt_titles = owned_alt_titles,
-            .available_languages = lang_list,
+            .alt_titles = try alt_list.toOwnedSlice(allocator),
+            .available_languages = try lang_list.toOwnedSlice(allocator),
             .summary = summary,
             .author = author,
             .artist = artist,
             .status = status,
-            .year = item.attributes.year,
+            .year = year,
             .cover_url = cover_url,
         };
     }
@@ -204,52 +218,62 @@ pub const MangaDexSource = struct {
     fn getChaptersBridge(ctx: *anyopaque, allocator: Allocator, source_series_id: []const u8, lang: []const u8) anyerror![]SourceChapter {
         const self: *MangaDexSource = @ptrCast(@alignCast(ctx));
         var all_chapters: std.ArrayListUnmanaged(SourceChapter) = .empty;
-        errdefer {
-            for (all_chapters.items) |*ch| {
-                if (ch.source_chapter_id.len > 0) allocator.free(ch.source_chapter_id);
-                if (ch.chapter_number.len > 0) allocator.free(ch.chapter_number);
-                if (ch.volume_number) |v| allocator.free(v);
-                if (ch.title) |t| allocator.free(t);
-                if (ch.language_iso.len > 0) allocator.free(ch.language_iso);
-                if (ch.scanlation_group) |g| allocator.free(g);
-            }
-            all_chapters.deinit(allocator);
-        }
 
         var offset: u32 = 0;
         const page_limit: u32 = 100;
 
         while (true) {
-            var res = try self.client.getMangaFeed(source_series_id, .{
+            const body = try self.web.fetchText(allocator, "get_manga_feed", .{
+                .manga_id = source_series_id,
                 .limit = page_limit,
                 .offset = offset,
-                .translatedLanguage = &.{lang},
-                .includes = &chapter_includes,
-                .order_chapter = SortOrder.asc.asStr(),
             });
-            defer res.deinit();
+            defer allocator.free(body);
 
-            if (res.items.len == 0) break;
+            const parsed = try std.json.parseFromSlice(std.json.Value, allocator, body, .{});
+            defer parsed.deinit();
+            if (parsed.value != .object) break;
 
-            for (res.items) |item| {
-                const ch_id = try allocator.dupe(u8, item.id);
-                errdefer allocator.free(ch_id);
-                const ch_num = try allocator.dupe(u8, item.attributes.chapter orelse "");
-                errdefer allocator.free(ch_num);
-                const vol = if (item.attributes.volume) |v| try allocator.dupe(u8, v) else null;
-                errdefer if (vol) |v| allocator.free(v);
-                const title = if (item.attributes.title) |t| try allocator.dupe(u8, t) else null;
-                errdefer if (title) |t| allocator.free(t);
-                const lang_iso = try allocator.dupe(u8, item.attributes.translatedLanguage);
-                errdefer allocator.free(lang_iso);
+            const data_val = parsed.value.object.get("data") orelse break;
+            if (data_val != .array or data_val.array.items.len == 0) break;
+
+            const total: u32 = if (parsed.value.object.get("total")) |tv|
+                (if (tv == .integer) @intCast(@max(0, tv.integer)) else 0)
+            else
+                0;
+
+            for (data_val.array.items) |item| {
+                if (item != .object) continue;
+                const obj = item.object;
+                const attrs = if (obj.get("attributes")) |a| (if (a == .object) a.object else continue) else continue;
+
+                const t_lang = getAttrString(attrs, "translatedLanguage") orelse "";
+                if (lang.len > 0 and !std.mem.eql(u8, t_lang, lang)) continue;
+
+                const ch_id = try allocator.dupe(u8, getAttrString(obj, "id") orelse "");
+                const ch_num = try allocator.dupe(u8, getAttrString(attrs, "chapter") orelse "");
+                const vol: ?[]const u8 = if (getAttrString(attrs, "volume")) |v| try allocator.dupe(u8, v) else null;
+                const title: ?[]const u8 = if (getAttrString(attrs, "title")) |t| try allocator.dupe(u8, t) else null;
+                const lang_iso = try allocator.dupe(u8, t_lang);
+                const pages: u32 = if (attrs.get("pages")) |pv| (if (pv == .integer) @intCast(@max(0, pv.integer)) else 0) else 0;
 
                 var group: ?[]const u8 = null;
-                for (item.relationships) |rel| {
-                    if (rel.kind() == .scanlation_group) {
-                        if (rel.attrString(.name)) |s| {
-                            group = try allocator.dupe(u8, s);
+                if (obj.get("relationships")) |rels| {
+                    if (rels == .array) {
+                        for (rels.array.items) |rel| {
+                            if (rel != .object) continue;
+                            const rtype = getAttrString(rel.object, "type") orelse continue;
+                            if (std.mem.eql(u8, rtype, "scanlation_group")) {
+                                if (rel.object.get("attributes")) |ra| {
+                                    if (ra == .object) {
+                                        if (getAttrString(ra.object, "name")) |s| {
+                                            group = try allocator.dupe(u8, s);
+                                        }
+                                    }
+                                }
+                                break;
+                            }
                         }
-                        break;
                     }
                 }
 
@@ -260,12 +284,12 @@ pub const MangaDexSource = struct {
                     .title = title,
                     .language_iso = lang_iso,
                     .scanlation_group = group,
-                    .page_count = item.attributes.pages,
+                    .page_count = pages,
                 });
             }
 
-            offset += @intCast(res.items.len);
-            if (res.items.len < page_limit or (res.total > 0 and offset >= res.total)) {
+            offset += @intCast(data_val.array.items.len);
+            if (data_val.array.items.len < page_limit or (total > 0 and offset >= total)) {
                 break;
             }
         }
@@ -275,20 +299,27 @@ pub const MangaDexSource = struct {
 
     fn getPageUrlsBridge(ctx: *anyopaque, allocator: Allocator, source_chapter_id: []const u8) anyerror![]SourcePageUrl {
         const self: *MangaDexSource = @ptrCast(@alignCast(ctx));
-        var res = try self.client.getAtHomeServer(source_chapter_id, false);
-        defer res.deinit();
+        const body = try self.web.fetchText(allocator, "get_at_home_server", .{
+            .chapter_id = source_chapter_id,
+        });
+        defer allocator.free(body);
 
-        const data_pages = res.chapter.data;
-        var list = try allocator.alloc(SourcePageUrl, data_pages.len);
-        errdefer {
-            for (list) |*p| {
-                if (p.url.len > 0) allocator.free(p.url);
-            }
-            allocator.free(list);
-        }
+        const parsed = try std.json.parseFromSlice(std.json.Value, allocator, body, .{});
+        defer parsed.deinit();
+        if (parsed.value != .object) return error.InvalidAtHomeResponse;
 
-        for (data_pages, 0..) |filename, idx| {
-            const page_url = try buildPageUrl(allocator, res.baseUrl, false, res.chapter.hash, filename);
+        const base_url = getAttrString(parsed.value.object, "baseUrl") orelse return error.InvalidAtHomeResponse;
+        const chapter_val = parsed.value.object.get("chapter") orelse return error.InvalidAtHomeResponse;
+        if (chapter_val != .object) return error.InvalidAtHomeResponse;
+
+        const hash = getAttrString(chapter_val.object, "hash") orelse return error.InvalidAtHomeResponse;
+        const data_pages = chapter_val.object.get("data") orelse return error.InvalidAtHomeResponse;
+        if (data_pages != .array) return error.InvalidAtHomeResponse;
+
+        var list = try allocator.alloc(SourcePageUrl, data_pages.array.items.len);
+        for (data_pages.array.items, 0..) |p_val, idx| {
+            const filename = if (p_val == .string) p_val.string else "";
+            const page_url = try std.fmt.allocPrint(allocator, "{s}/data/{s}/{s}", .{ base_url, hash, filename });
             list[idx] = .{
                 .page_number = @intCast(idx + 1),
                 .url = page_url,
