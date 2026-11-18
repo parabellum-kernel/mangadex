@@ -1,0 +1,36 @@
+version: 2
+id: komga_api
+base_url: "${KOMGA_URL:-http://localhost:25600}"
+network: komga_api
+headers:
+  Accept: "application/json"
+
+endpoints:
+  list_libraries:
+    method: GET
+    path: "/api/v1/libraries"
+    response: text
+
+  scan_library:
+    method: POST
+    path: "/api/v1/libraries/{library_id}/scan"
+    query:
+      deep: "{deep:-false}"
+    response:
+      format: empty
+      success_status: [200, 202, 204]
+
+  search_series:
+    method: GET
+    path: "/api/v1/series"
+    query:
+      search: "{search}"
+      library_id: "{library_id}"
+    response: text
+
+  analyze_series:
+    method: POST
+    path: "/api/v1/series/{series_id}/analyze"
+    response:
+      format: empty
+      success_status: [200, 202, 204]

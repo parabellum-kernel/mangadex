@@ -1,8 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const EnvStore = @import("env.zig").EnvStore;
-const sdk = @import("mangadex_sdk");
-const komga_sdk = @import("komga_sdk");
 
 pub const AppConfig = struct {
     api_url: []const u8 = "https://api.mangadex.org",
@@ -78,54 +76,5 @@ pub const AppConfig = struct {
         const n = std.c.read(fd, buf.ptr, size);
         if (n <= 0) return null;
         return buf[0..@intCast(n)];
-    }
-
-    /// Builds the appropriate `AuthProvider` based on present variables:
-    /// 1. If MANGADEX_ACCESS_TOKEN / MANGADEX_TOKEN is set -> StaticTokenAuth
-    /// 2. If Personal Client credentials are set -> PersonalClientAuth
-    /// 3. Otherwise -> null (anonymous mode for public browsing)
-    pub fn resolveAuthProvider(self: AppConfig, allocator: Allocator, interp: *const EnvStore) !?sdk.AuthProvider {
-        if (interp.get("MANGADEX_ACCESS_TOKEN") orelse interp.get("MANGADEX_TOKEN")) |token| {
-            if (token.len > 0) {
-                return try sdk.StaticTokenAuth.create(allocator, token);
-            }
-        }
-
-        const client_id = interp.get("MANGADEX_CLIENT_ID");
-        const client_secret = interp.get("MANGADEX_CLIENT_SECRET");
-        const username = interp.get("MANGADEX_USERNAME");
-        const password = interp.get("MANGADEX_PASSWORD");
-
-        if (client_id != null and client_secret != null and username != null and password != null) {
-            if (client_id.?.len > 0 and client_secret.?.len > 0 and username.?.len > 0 and password.?.len > 0) {
-                return try sdk.PersonalClientAuth.create(allocator, .{
-                    .auth_url = self.auth_url,
-                    .client_id = client_id.?,
-                    .client_secret = client_secret.?,
-                    .username = username.?,
-                    .password = password.?,
-                });
-            }
-        }
-
-        return null;
-    }
-
-    /// Resolves KomgaAuth strategy from loaded configuration:
-    /// 1. If `komga_api_key` is set -> api_key
-    /// 2. If `komga_username` and `komga_password` are set -> basic_auth
-    /// 3. Otherwise -> none
-    pub fn resolveKomgaAuth(self: AppConfig) komga_sdk.KomgaAuth {
-        if (self.komga_api_key) |k| {
-            if (k.len > 0) return .{ .api_key = k };
-        }
-        if (self.komga_username) |u| {
-            if (self.komga_password) |p| {
-                if (u.len > 0 and p.len > 0) {
-                    return .{ .basic_auth = .{ .username = u, .password = p } };
-                }
-            }
-        }
-        return .none;
     }
 };

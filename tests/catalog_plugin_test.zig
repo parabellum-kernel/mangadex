@@ -1,8 +1,9 @@
 const std = @import("std");
 const abi = @import("parabellum_abi");
+const sdk_abi = @import("parabellum_sdk").abi;
+const WebClient = @import("parabellum_sdk").WebClient;
 const plugin = @import("mangadex_app");
 const catalog = plugin.catalog;
-const sdk = @import("mangadex_sdk");
 
 test "Catalog plugin manifest conforms to Parabellum ABI" {
     const manifest = catalog.manifest;
@@ -145,6 +146,71 @@ const MockPluginHost = struct {
             fn carveToQuarantine(_: *abi.TaskContext_ABI, _: u64, _: u64, _: [*:0]const u8, _: *[64]u8) callconv(.c) abi.HostError_ABI {
                 return .ok;
             }
+            fn getRepository(
+                _: *abi.TaskContext_ABI,
+                ds_id: [*:0]const u8,
+                out_repo: *?*anyopaque,
+                out_vt: *?*const anyopaque,
+            ) callconv(.c) abi.HostError_ABI {
+                const Repo = struct {
+                    const IterState = struct {
+                        body: []const u8,
+                        yielded: bool = false,
+                        field: sdk_abi.NamedField_ABI = undefined,
+                    };
+                    var dummy: u8 = 0;
+                    var iter_state: IterState = .{ .body = "" };
+
+                    fn getCaps(_: *const sdk_abi.driver.RepoHandle_ABI) callconv(.c) sdk_abi.DriverCapabilities_ABI {
+                        return .{ .read = true, .streaming_read = true };
+                    }
+                    fn recCount(_: *const sdk_abi.driver.RepoHandle_ABI, _: sdk_abi.Slice_ABI) callconv(.c) usize {
+                        return 0;
+                    }
+                    fn deinitRepo(_: *sdk_abi.driver.RepoHandle_ABI) callconv(.c) void {}
+                    fn iterNext(h: *sdk_abi.driver.RowIteratorHandle_ABI, out_row: *sdk_abi.RowView_ABI) callconv(.c) sdk_abi.HostError_ABI {
+                        const st: *IterState = @ptrCast(@alignCast(h));
+                        if (st.yielded) return .end_of_stream;
+                        st.yielded = true;
+                        st.field = .{
+                            .name = "body",
+                            .value = .{ .tag = .bytes_val, .payload = .{ .bytes = sdk_abi.Slice_ABI.from(st.body) } },
+                        };
+                        out_row.* = .{ .fields_ptr = (&st.field)[0..1].ptr, .fields_len = 1 };
+                        return .ok;
+                    }
+                    fn iterDeinit(_: *sdk_abi.driver.RowIteratorHandle_ABI) callconv(.c) void {}
+                    const iter_vt = sdk_abi.driver.RowIteratorVTable_ABI{ .next = iterNext, .deinit = iterDeinit };
+
+                    fn readStream(_: *sdk_abi.driver.RepoHandle_ABI, spec: *const sdk_abi.ReadSpec_ABI, out_iter: *sdk_abi.driver.RowIterator_ABI) callconv(.c) sdk_abi.HostError_ABI {
+                        const ep = spec.table.toSlice();
+                        const body: []const u8 = if (std.mem.eql(u8, ep, "get_manga"))
+                            \\{"result":"ok","response":"entity","data":{"id":"series-test-uuid","type":"manga","attributes":{"title":{"en":"Chainsaw Man"},"description":{"en":"Devil hunter"},"status":"ongoing","availableTranslatedLanguages":["en","es","fr"],"altTitles":[]},"relationships":[{"id":"a1","type":"author","attributes":{"name":"Tatsuki Fujimoto"}}]}}
+                        else if (std.mem.eql(u8, ep, "get_manga_feed"))
+                            \\{"result":"ok","response":"collection","data":[{"id":"ch-es-1","type":"chapter","attributes":{"volume":"1","chapter":"1","title":"Perro y Motosierra","translatedLanguage":"es","pages":20},"relationships":[{"id":"grp-1","type":"scanlation_group","attributes":{"name":"FansubES"}}]}],"limit":100,"offset":0,"total":1}
+                        else
+                            "{}";
+                        iter_state = .{ .body = body, .yielded = false };
+                        out_iter.* = .{ .handle = @ptrCast(&iter_state), .vtable = &iter_vt };
+                        return .ok;
+                    }
+
+                    const vt = sdk_abi.driver.StorageRepositoryVTable_ABI{
+                        .get_capabilities = getCaps,
+                        .record_count = recCount,
+                        .deinit = deinitRepo,
+                        .read_stream = readStream,
+                    };
+                };
+
+                if (std.mem.eql(u8, std.mem.span(ds_id), "mangadex_api")) {
+                    out_repo.* = &Repo.dummy;
+                    out_vt.* = &Repo.vt;
+                    return .ok;
+                }
+                return .not_found;
+            }
+
             const vtable = abi.HostApiVTable_ABI{
                 .stream_size = &streamSize,
                 .stream_read_at = &streamReadAt,
@@ -159,6 +225,7 @@ const MockPluginHost = struct {
                 .carve_to_quarantine = &carveToQuarantine,
                 .log_event = &logEvent,
                 .net_request = &netRequest,
+                .get_repository = &getRepository,
             };
         };
 
@@ -371,31 +438,56 @@ test "FetchSeriesDetailsService: DI injection via TestContainer" {
 // Tests for DownloadChapterPageService
 // ---------------------------------------------------------------------------
 
-const MockPageHttpTransport = struct {
-    status_code: u16 = 200,
+const MockWebBytesRepo = struct {
     response_body: []const u8 = "\x89PNG\r\n\x1a\nfake-png-binary-stream",
+    fail_io: bool = false,
 
-    pub fn httpTransport(self: *MockPageHttpTransport) sdk.HttpTransport {
-        return .{
-            .ptr = self,
-            .vtable = &.{ .execute = executeMock },
+    const IterState = struct {
+        body: []const u8,
+        yielded: bool = false,
+        field: sdk_abi.NamedField_ABI = undefined,
+    };
+    var iter_state: IterState = .{ .body = "" };
+
+    fn getCaps(_: *const sdk_abi.driver.RepoHandle_ABI) callconv(.c) sdk_abi.DriverCapabilities_ABI {
+        return .{ .read = true, .streaming_read = true };
+    }
+    fn recCount(_: *const sdk_abi.driver.RepoHandle_ABI, _: sdk_abi.Slice_ABI) callconv(.c) usize {
+        return 0;
+    }
+    fn deinitRepo(_: *sdk_abi.driver.RepoHandle_ABI) callconv(.c) void {}
+
+    fn iterNext(handle: *sdk_abi.driver.RowIteratorHandle_ABI, out_row: *sdk_abi.RowView_ABI) callconv(.c) sdk_abi.HostError_ABI {
+        const st: *IterState = @ptrCast(@alignCast(handle));
+        if (st.yielded) return .end_of_stream;
+        st.yielded = true;
+        st.field = .{
+            .name = "data",
+            .value = .{ .tag = .bytes_val, .payload = .{ .bytes = sdk_abi.Slice_ABI.from(st.body) } },
         };
+        out_row.* = .{ .fields_ptr = (&st.field)[0..1].ptr, .fields_len = 1 };
+        return .ok;
+    }
+    fn iterDeinit(_: *sdk_abi.driver.RowIteratorHandle_ABI) callconv(.c) void {}
+    const iter_vt = sdk_abi.driver.RowIteratorVTable_ABI{ .next = iterNext, .deinit = iterDeinit };
+
+    fn readStream(repo_handle: *sdk_abi.driver.RepoHandle_ABI, _: *const sdk_abi.ReadSpec_ABI, out_iter: *sdk_abi.driver.RowIterator_ABI) callconv(.c) sdk_abi.HostError_ABI {
+        const self: *MockWebBytesRepo = @ptrCast(@alignCast(repo_handle));
+        if (self.fail_io) return .io_error;
+        iter_state = .{ .body = self.response_body, .yielded = false };
+        out_iter.* = .{ .handle = @ptrCast(&iter_state), .vtable = &iter_vt };
+        return .ok;
     }
 
-    fn executeMock(
-        ctx: *anyopaque,
-        _: std.mem.Allocator,
-        _: sdk.HttpMethod,
-        _: []const u8,
-        _: []const sdk.HttpHeader,
-        _: []const u8,
-    ) sdk.HttpTransportError!sdk.HttpResponse {
-        const self: *MockPageHttpTransport = @ptrCast(@alignCast(ctx));
-        if (self.status_code == 0) return error.NetworkFailure;
-        return .{
-            .status_code = self.status_code,
-            .body = self.response_body,
-        };
+    const vt = sdk_abi.driver.StorageRepositoryVTable_ABI{
+        .get_capabilities = getCaps,
+        .record_count = recCount,
+        .deinit = deinitRepo,
+        .read_stream = readStream,
+    };
+
+    pub fn webClient(self: *MockWebBytesRepo) WebClient {
+        return .{ .handle = @ptrCast(self), .vtable = &vt };
     }
 };
 
@@ -404,12 +496,12 @@ test "DownloadChapterPageService: direct execution downloads raw bytes" {
     defer arena.deinit();
     const test_alloc = arena.allocator();
 
-    var mock_http = MockPageHttpTransport{
+    var mock_repo = MockWebBytesRepo{
         .response_body = "\x89PNG\r\n\x1a\nraw-png-bytes",
     };
 
     var service = catalog.DownloadChapterPageService{
-        .http = mock_http.httpTransport(),
+        .web = mock_repo.webClient(),
         .logger = abi.Logger.noop(),
     };
 
@@ -431,12 +523,12 @@ test "DownloadChapterPageService: error on HTTP 404 or empty URL" {
     defer arena.deinit();
     const test_alloc = arena.allocator();
 
-    var mock_http = MockPageHttpTransport{
-        .status_code = 404,
+    var mock_repo = MockWebBytesRepo{
+        .fail_io = true,
     };
 
     var service = catalog.DownloadChapterPageService{
-        .http = mock_http.httpTransport(),
+        .web = mock_repo.webClient(),
         .logger = abi.Logger.noop(),
     };
 
@@ -446,7 +538,7 @@ test "DownloadChapterPageService: error on HTTP 404 or empty URL" {
         .url = "https://cdn.mangadex.org/data/missing.jpg",
     };
 
-    try std.testing.expectError(error.HttpDownloadFailed, service.execute(test_alloc, item));
+    try std.testing.expectError(error.HostIoError, service.execute(test_alloc, item));
 
     // Empty URL error
     const empty_item = catalog.ChapterPageItem{
@@ -463,11 +555,11 @@ test "DownloadChapterPageService: DI injection via TestContainer" {
     const test_alloc = arena.allocator();
 
     const TestContext = struct {
-        mock_http: MockPageHttpTransport = .{},
+        mock_repo: MockWebBytesRepo = .{},
         logger: abi.Logger = abi.Logger.noop(),
 
-        pub fn provideHttpTransport(self: *@This()) sdk.HttpTransport {
-            return self.mock_http.httpTransport();
+        pub fn provideWebClient(self: *@This()) WebClient {
+            return self.mock_repo.webClient();
         }
     };
     const TestContainer = abi.DiContainer(TestContext);
@@ -928,22 +1020,12 @@ test "DownloadCoverService: downloads cover and detects extension from magic byt
     defer arena.deinit();
     const test_alloc = arena.allocator();
 
-    const MockCoverHttp = struct {
-        fn execute(_: *anyopaque, alloc: std.mem.Allocator, _: sdk.HttpMethod, _: []const u8, _: []const sdk.HttpHeader, _: []const u8) error{ InvalidUrl, NetworkFailure, OutOfMemory, RateLimited, Timeout }!sdk.HttpResponse {
-            return .{
-                .status_code = 200,
-                .body = try alloc.dupe(u8, "\x89PNG\r\n\x1a\nfake-png-cover"),
-            };
-        }
-    };
-    var dummy: u8 = 0;
-    const http = sdk.HttpTransport{
-        .ptr = &dummy,
-        .vtable = &.{ .execute = MockCoverHttp.execute },
+    var mock_repo = MockWebBytesRepo{
+        .response_body = "\x89PNG\r\n\x1a\nfake-png-cover",
     };
 
     var svc = catalog.DownloadCoverService{
-        .http = http,
+        .web = mock_repo.webClient(),
         .logger = abi.Logger.noop(),
     };
 

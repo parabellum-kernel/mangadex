@@ -1,8 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Logger = @import("parabellum_abi").Logger;
-const sdk = @import("mangadex_sdk");
-const HttpTransport = sdk.HttpTransport;
+const WebClient = @import("parabellum_sdk").WebClient;
 const ChapterPageItem = @import("fetch_chapter_pages.zig").ChapterPageItem;
 
 pub const DownloadedPageItem = struct {
@@ -14,10 +13,10 @@ pub const DownloadedPageItem = struct {
     image_data: []const u8,
 };
 
-/// Service that downloads a single chapter page image via HTTP
+/// Service that downloads a single chapter page image via `WebClient`
 /// and returns a DownloadedPageItem containing the raw image bytes.
 pub const DownloadChapterPageService = struct {
-    http: HttpTransport,
+    web: WebClient,
     logger: Logger,
 
     pub fn execute(self: *DownloadChapterPageService, alloc: Allocator, item: ChapterPageItem) !DownloadedPageItem {
@@ -31,34 +30,9 @@ pub const DownloadChapterPageService = struct {
 
         self.logger.info("Downloading page {d} from '{s}'", .{ item.page_number, item.url });
 
-        var attempts: usize = 0;
-        const max_attempts: usize = 8;
-        const resp = while (attempts < max_attempts) : (attempts += 1) {
-            const r = self.http.execute(alloc, .GET, item.url, &.{}, &.{}) catch |err| {
-                if (err == error.RateLimited and attempts + 1 < max_attempts) {
-                    const wait_ms = @as(u64, @intCast(attempts + 1)) * 150;
-                    var ts: std.c.timespec = .{
-                        .sec = @intCast(wait_ms / 1000),
-                        .nsec = @intCast((wait_ms % 1000) * 1000 * 1000),
-                    };
-                    _ = std.c.nanosleep(&ts, null);
-                    continue;
-                }
-                return err;
-            };
-            break r;
-        } else return error.RateLimited;
-
-        if (resp.status_code < 200 or resp.status_code >= 300) {
-            self.logger.err("HTTP {d} received while downloading page {d} from '{s}'", .{
-                resp.status_code,
-                item.page_number,
-                item.url,
-            });
-            return error.HttpDownloadFailed;
-        }
-
-        if (resp.body.len == 0) {
+        const body = try self.web.fetchBytes(alloc, "download_bytes", .{ .url = item.url });
+        if (body.len == 0) {
+            alloc.free(body);
             self.logger.err("Received empty image payload for page {d} from '{s}'", .{
                 item.page_number,
                 item.url,
@@ -72,7 +46,7 @@ pub const DownloadChapterPageService = struct {
             .chapter_number = try alloc.dupe(u8, item.chapter_number),
             .page_number = item.page_number,
             .url = try alloc.dupe(u8, item.url),
-            .image_data = resp.body,
+            .image_data = body,
         };
     }
 };
