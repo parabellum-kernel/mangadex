@@ -1,6 +1,6 @@
 .{
     .name = .mangadex_app,
-    .version = "2.0.0",
+    .version = "2.0.1",
     .minimum_zig_version = "0.17.1",
     .fingerprint = 0xfc3c71c2a137cc5b,
     .dependencies = .{
