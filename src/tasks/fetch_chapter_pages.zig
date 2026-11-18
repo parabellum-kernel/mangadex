@@ -1,6 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Logger = @import("parabellum_abi").Logger;
+const abi = @import("parabellum_abi");
+const Logger = abi.Logger;
 const WebClient = @import("parabellum_sdk").WebClient;
 const fetch_chapters = @import("fetch_chapters.zig");
 

@@ -173,7 +173,8 @@ pub const UploadCbzService = struct {
                 if (cbz.series_id.len > 0) cbz.series_id else series_name,
                 cbz.chapter_number,
             });
-            const rec_id = try std.fmt.allocPrint(alloc, "komga:{s}:{d}", .{ chapter_ref, now_sec });
+            const ch_id = if (cbz.source_chapter_id.len > 0) cbz.source_chapter_id else chapter_ref;
+            const rec_id = try std.fmt.allocPrint(alloc, "komga:{s}:{d}", .{ ch_id, now_sec });
             const details = try std.fmt.allocPrint(alloc, "library={s} file={s} bytes={d}", .{
                 library_id,
                 cbz.filename,
@@ -181,7 +182,7 @@ pub const UploadCbzService = struct {
             });
             records[idx] = .{
                 .id = rec_id,
-                .source_chapter_id = chapter_ref,
+                .source_chapter_id = ch_id,
                 .target = "komga",
                 .external_book_id = if (komga_series_id) |kid| try alloc.dupe(u8, kid) else null,
                 .delivered_at = now_sec,

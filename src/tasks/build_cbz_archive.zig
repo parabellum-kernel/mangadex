@@ -55,6 +55,7 @@ pub const BuildCbzArchiveInputs = struct {
 pub const CbzArchiveOutput = struct {
     archive_path: []const u8 = "",
     filename: []const u8 = "",
+    source_chapter_id: []const u8 = "",
     series_id: []const u8 = "",
     series: []const u8 = "",
     library: []const u8 = "",
@@ -296,6 +297,7 @@ pub const BuildCbzArchiveService = struct {
             try results.append(alloc, .{
                 .archive_path = archive_path,
                 .filename = filename,
+                .source_chapter_id = if (group.pages.items.len > 0) group.pages.items[0].source_chapter_id else "",
                 .series_id = series_id,
                 .series = series_label,
                 .library = resolved_library,

@@ -19,7 +19,7 @@ endpoints:
 
   get_manga:
     method: GET
-    path: "/manga/{manga_id}"
+    path: "/manga/{series_id}"
     query:
       "includes[0]": "cover_art"
       "includes[1]": "author"

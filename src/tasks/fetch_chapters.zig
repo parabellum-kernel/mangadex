@@ -3,6 +3,7 @@ const Allocator = std.mem.Allocator;
 const abi = @import("parabellum_abi");
 const Logger = abi.Logger;
 const WebClient = @import("parabellum_sdk").WebClient;
+const SeriesDetails = @import("fetch_series_details.zig").SeriesDetails;
 
 pub const FetchChaptersInputs = struct {
     series_id: []const u8,
@@ -120,11 +121,13 @@ pub const FetchChaptersService = struct {
     web: WebClient,
     logger: Logger,
 
-    /// Only accepts `SeriesDetails`-like payloads (must carry `series_id` and `source_id` or `status`),
-    /// preventing premature activation on raw `JobSpec` records before `fetch_series_details`.
+    /// Only accepts `SeriesDetails` payloads (`series_id` + `source_id`, without chapter/page fields),
+    /// preventing re-entry on `DownloadedPageItem` (`series_id` + `status`).
     pub fn canHandle(payload: *const abi.PayloadHandle_ABI) bool {
         return payload.getReflected("series_id") != null and
-            (payload.getReflected("source_id") != null or payload.getReflected("status") != null);
+            payload.getReflected("source_id") != null and
+            payload.getReflected("page_number") == null and
+            payload.getReflected("source_chapter_id") == null;
     }
 
     pub fn execute(self: *FetchChaptersService, alloc: Allocator, inputs: FetchChaptersInputs) ![]ChapterItem {

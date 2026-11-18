@@ -11,7 +11,7 @@ test "Catalog plugin manifest conforms to Parabellum ABI" {
     try std.testing.expectEqual(abi.PARABELLUM_ABI_VERSION, manifest.abi_version);
     try std.testing.expectEqualStrings("manga_catalog", manifest.nameSlice());
     try std.testing.expectEqual(@as(u32, 1), manifest.module_version.major);
-    try std.testing.expectEqual(@as(usize, 10), manifest.tasks_len);
+    try std.testing.expectEqual(@as(usize, 11), manifest.tasks_len);
 
     // Verify task discovery
     const t_details = manifest.findTask("fetch_series_details");
@@ -42,6 +42,7 @@ test "Catalog plugin manifest conforms to Parabellum ABI" {
     try std.testing.expect(manifest.findTask("generate_comicinfo") != null);
     try std.testing.expect(manifest.findTask("build_cbz_archive") != null);
     try std.testing.expect(manifest.findTask("upload_cbz") != null);
+    try std.testing.expect(manifest.findTask("cleanup_page_blobs") != null);
 }
 
 // Mock TaskContext for execution testing
@@ -70,6 +71,11 @@ const MockPluginHost = struct {
                     return .ok;
                 } else if (std.mem.eql(u8, key, "languages")) {
                     out_val.* = abi.Value_ABI.fromText(host.languages_param);
+                    return .ok;
+                } else if (std.mem.eql(u8, key, "body")) {
+                    out_val.* = abi.Value_ABI.fromText(
+                        \\{"result":"ok","response":"entity","data":{"id":"series-test-uuid","type":"manga","attributes":{"title":{"en":"Chainsaw Man"},"description":{"en":"Devil hunter"},"status":"ongoing","availableTranslatedLanguages":["en","es","fr"],"altTitles":[]},"relationships":[{"id":"a1","type":"author","attributes":{"name":"Tatsuki Fujimoto"}}]}}
+                    );
                     return .ok;
                 }
                 return .not_found;
@@ -252,6 +258,9 @@ test "Catalog tasks return typed structs and C-ABI trampoline auto-emits outputs
     // 1. Direct call returns SeriesDetails struct without manual emits
     const details = try catalog.MangaPluginContainer.runWithContext(catalog.FetchSeriesDetailsService, test_alloc, ctx, catalog.MangaJob{
         .series_id = "series-test-uuid",
+        .body =
+        \\{"result":"ok","response":"entity","data":{"id":"series-test-uuid","type":"manga","attributes":{"title":{"en":"Chainsaw Man"},"description":{"en":"Devil hunter"},"status":"ongoing","availableTranslatedLanguages":["en","es","fr"],"altTitles":[]},"relationships":[{"id":"a1","type":"author","attributes":{"name":"Tatsuki Fujimoto"}}]}}
+        ,
     });
     try std.testing.expectEqualStrings("series-test-uuid", details.series_id);
     try std.testing.expectEqualStrings("Chainsaw Man", details.title);
@@ -298,77 +307,28 @@ test "Catalog dynamic datasource resolution and unknown source error" {
     // Explicit 'mangadex' datasource resolves properly
     const details = try catalog.MangaPluginContainer.runWithContext(catalog.FetchSeriesDetailsService, test_alloc, ctx, catalog.MangaJob{
         .series_id = "series-test-uuid",
+        .body =
+        \\{"result":"ok","response":"entity","data":{"id":"series-test-uuid","type":"manga","attributes":{"title":{"en":"Chainsaw Man"},"description":{"en":"Devil hunter"},"status":"ongoing","availableTranslatedLanguages":["en","es","fr"],"altTitles":[]},"relationships":[{"id":"a1","type":"author","attributes":{"name":"Tatsuki Fujimoto"}}]}}
+        ,
         .datasource = "mangadex",
     });
     try std.testing.expectEqualStrings("Chainsaw Man", details.title);
 }
 
-const MockWebJsonRepo = struct {
-    const IterState = struct {
-        body: []const u8,
-        yielded: bool = false,
-        field: sdk_abi.NamedField_ABI = undefined,
-    };
-    var iter_state: IterState = .{ .body = "" };
-
-    fn getCaps(_: *const sdk_abi.driver.RepoHandle_ABI) callconv(.c) sdk_abi.DriverCapabilities_ABI {
-        return .{ .read = true, .streaming_read = true };
-    }
-    fn recCount(_: *const sdk_abi.driver.RepoHandle_ABI, _: sdk_abi.Slice_ABI) callconv(.c) usize {
-        return 0;
-    }
-    fn deinitRepo(_: *sdk_abi.driver.RepoHandle_ABI) callconv(.c) void {}
-
-    fn iterNext(handle: *sdk_abi.driver.RowIteratorHandle_ABI, out_row: *sdk_abi.RowView_ABI) callconv(.c) sdk_abi.HostError_ABI {
-        const st: *IterState = @ptrCast(@alignCast(handle));
-        if (st.yielded) return .end_of_stream;
-        st.yielded = true;
-        st.field = .{
-            .name = "body",
-            .value = .{ .tag = .bytes_val, .payload = .{ .bytes = sdk_abi.Slice_ABI.from(st.body) } },
-        };
-        out_row.* = .{ .fields_ptr = (&st.field)[0..1].ptr, .fields_len = 1 };
-        return .ok;
-    }
-    fn iterDeinit(_: *sdk_abi.driver.RowIteratorHandle_ABI) callconv(.c) void {}
-    const iter_vt = sdk_abi.driver.RowIteratorVTable_ABI{ .next = iterNext, .deinit = iterDeinit };
-
-    fn readStream(_: *sdk_abi.driver.RepoHandle_ABI, _: *const sdk_abi.ReadSpec_ABI, out_iter: *sdk_abi.driver.RowIterator_ABI) callconv(.c) sdk_abi.HostError_ABI {
-        iter_state = .{
-            .body =
-            \\{"result":"ok","data":{"id":"mock-uuid-123","type":"manga","attributes":{"title":{"en":"Mock Chainsaw Man"},"status":"ongoing","availableTranslatedLanguages":["en","es"]},"relationships":[{"id":"a1","type":"author","attributes":{"name":"Mock Author"}}]}}
-            ,
-            .yielded = false,
-        };
-        out_iter.* = .{ .handle = @ptrCast(&iter_state), .vtable = &iter_vt };
-        return .ok;
-    }
-
-    const vt = sdk_abi.driver.StorageRepositoryVTable_ABI{
-        .get_capabilities = getCaps,
-        .record_count = recCount,
-        .deinit = deinitRepo,
-        .read_stream = readStream,
-    };
-
-    pub fn webClient(self: *MockWebJsonRepo) WebClient {
-        return .{ .handle = @ptrCast(self), .vtable = &vt };
-    }
-};
-
-test "FetchSeriesDetailsService: direct struct instantiation (pure unit test)" {
+test "FetchSeriesDetailsService: direct struct instantiation (pure CPU unit test)" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const test_alloc = arena.allocator();
 
-    var mock = MockWebJsonRepo{};
     var service = catalog.FetchSeriesDetailsService{
-        .web = mock.webClient(),
         .logger = abi.Logger.noop(),
     };
 
     const details = try service.execute(test_alloc, .{
         .series_id = "mock-uuid-123",
+        .body =
+        \\{"result":"ok","data":{"id":"mock-uuid-123","type":"manga","attributes":{"title":{"en":"Mock Chainsaw Man"},"status":"ongoing","availableTranslatedLanguages":["en","es"]},"relationships":[{"id":"a1","type":"author","attributes":{"name":"Mock Author"}}]}}
+        ,
     });
     try std.testing.expectEqualStrings("mock-uuid-123", details.series_id);
     try std.testing.expectEqualStrings("Mock Chainsaw Man", details.title);
@@ -382,17 +342,17 @@ test "FetchSeriesDetailsService: DI injection via TestContainer" {
     const test_alloc = arena.allocator();
 
     const TestContext = struct {
-        mock_repo: MockWebJsonRepo = .{},
         logger: abi.Logger = abi.Logger.noop(),
-
-        pub fn provideWebClient(self: *@This()) WebClient {
-            return self.mock_repo.webClient();
-        }
     };
     const TestContainer = abi.DiContainer(TestContext);
 
     var test_ctx = TestContext{};
-    const job = catalog.MangaJob{ .series_id = "test-di-series" };
+    const job = catalog.MangaJob{
+        .series_id = "test-di-series",
+        .body =
+        \\{"result":"ok","data":{"id":"test-di-series","type":"manga","attributes":{"title":{"en":"Mock Chainsaw Man"},"status":"ongoing","availableTranslatedLanguages":["en","es"]},"relationships":[{"id":"a1","type":"author","attributes":{"name":"Mock Author"}}]}}
+        ,
+    };
 
     var service = try TestContainer.inject(
         catalog.FetchSeriesDetailsService,
@@ -1036,4 +996,63 @@ test "DownloadCoverService: downloads cover and detects extension from magic byt
     try std.testing.expectEqualStrings("The Ghostly Doctor", res[0].series);
     try std.testing.expectEqualStrings("manga", res[0].library);
     try std.testing.expect(std.mem.startsWith(u8, res[0].data, "\x89PNG"));
+}
+
+test "CleanupPageBlobsService: clears image_blob only for delivered chapters" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var svc = catalog.CleanupPageBlobsService{
+        .logger = abi.Logger.noop(),
+    };
+
+    const egress = [_]catalog.EgressDeliveryRecord{
+        .{
+            .id = "komga:ch-1:100",
+            .source_chapter_id = "ch-1",
+            .target = "komga",
+            .delivered_at = 100,
+            .status = "delivered",
+        },
+        .{
+            .id = "komga:ch-2:100",
+            .source_chapter_id = "ch-2",
+            .target = "komga",
+            .delivered_at = 100,
+            .status = "failed",
+        },
+    };
+    const pages = [_]catalog.DownloadedPageItem{
+        .{
+            .source_chapter_id = "ch-1",
+            .page_number = 1,
+            .url = "https://img/1.png",
+            .image_data = "raw",
+            .image_blob = "raw",
+            .byte_size = 3,
+            .status = "downloaded",
+            .downloaded_at = 99,
+        },
+        .{
+            .source_chapter_id = "ch-2",
+            .page_number = 1,
+            .url = "https://img/2.png",
+            .image_data = "raw2",
+            .image_blob = "raw2",
+            .byte_size = 4,
+            .status = "downloaded",
+            .downloaded_at = 99,
+        },
+    };
+
+    const cleaned = try svc.execute(alloc, .{
+        .egress_history = &egress,
+        .downloaded_pages = &pages,
+    });
+    try std.testing.expectEqual(@as(usize, 1), cleaned.len);
+    try std.testing.expectEqualStrings("ch-1", cleaned[0].source_chapter_id);
+    try std.testing.expectEqual(@as(?[]const u8, null), cleaned[0].image_blob);
+    try std.testing.expectEqualStrings("cleaned", cleaned[0].status);
+    try std.testing.expectEqual(@as(i64, 3), cleaned[0].byte_size);
 }

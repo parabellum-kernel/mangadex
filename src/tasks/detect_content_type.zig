@@ -1,6 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Logger = @import("parabellum_abi").Logger;
+const abi = @import("parabellum_abi");
+const Logger = abi.Logger;
 const DownloadedPageItem = @import("download_chapter_page.zig").DownloadedPageItem;
 
 pub const PageWithContentType = struct {

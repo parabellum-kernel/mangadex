@@ -15,6 +15,7 @@ pub const task_comicinfo = @import("tasks/generate_comicinfo.zig");
 pub const task_cbz = @import("tasks/build_cbz_archive.zig");
 pub const task_upload_cbz = @import("tasks/upload_cbz.zig");
 pub const task_download_cover = @import("tasks/download_cover.zig");
+pub const task_cleanup_blobs = @import("tasks/cleanup_page_blobs.zig");
 
 // DTOs & Services
 pub const MangaJob = task_details.MangaJob;
@@ -54,6 +55,10 @@ pub const UploadCbzService = task_upload_cbz.UploadCbzService;
 pub const DownloadCoverInputs = task_download_cover.DownloadCoverInputs;
 pub const CoverOutput = task_download_cover.CoverOutput;
 pub const DownloadCoverService = task_download_cover.DownloadCoverService;
+
+pub const CleanupPageBlobsInputs = task_cleanup_blobs.CleanupPageBlobsInputs;
+pub const CleanedPageItem = task_cleanup_blobs.CleanedPageItem;
+pub const CleanupPageBlobsService = task_cleanup_blobs.CleanupPageBlobsService;
 
 // C-ABI Task Descriptors and Manifest assembled via MangaPluginContainer
 pub const tasks = [_]abi.TaskDescriptor_ABI{
@@ -101,6 +106,10 @@ pub const tasks = [_]abi.TaskDescriptor_ABI{
     MangaPluginContainer.defineTaskService(DownloadCoverService, .{
         .name = "download_cover",
         .description = "Downloads the series cover image and emits Komga-compatible local artwork (cover.jpg/png/webp)",
+    }),
+    MangaPluginContainer.defineTaskService(CleanupPageBlobsService, .{
+        .name = "cleanup_page_blobs",
+        .description = "Clears persisted image_blob payloads in discovered_pages after successful CBZ delivery",
     }),
 };
 

@@ -1,10 +1,11 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Logger = @import("parabellum_abi").Logger;
-const WebClient = @import("parabellum_sdk").WebClient;
+const abi = @import("parabellum_abi");
+const Logger = abi.Logger;
 
 pub const MangaJob = struct {
     series_id: []const u8,
+    body: []const u8,
     datasource: ?[]const u8 = null,
     languages: []const u8 = "en",
     chapters: []const u8 = "all",
@@ -43,19 +44,18 @@ fn getAttrString(obj: std.json.ObjectMap, key: []const u8) ?[]const u8 {
     return if (v == .string) v.string else null;
 }
 
+/// Pure CPU task that normalizes raw MangaDex `/manga/{series_id}` JSON into `SeriesDetails`.
 pub const FetchSeriesDetailsService = struct {
-    web: WebClient,
     logger: Logger,
 
+    pub fn canHandle(payload: *const abi.PayloadHandle_ABI) bool {
+        return payload.getReflected("body") != null and payload.getReflected("series_id") != null;
+    }
+
     pub fn execute(self: *FetchSeriesDetailsService, alloc: Allocator, job: MangaJob) !SeriesDetails {
-        self.logger.info("Fetching series details for series_id={s}", .{job.series_id});
+        self.logger.info("Parsing series details for series_id={s}", .{job.series_id});
 
-        const body = try self.web.fetchText(alloc, "get_manga", .{
-            .manga_id = job.series_id,
-        });
-        defer alloc.free(body);
-
-        const parsed = try std.json.parseFromSlice(std.json.Value, alloc, body, .{});
+        const parsed = try std.json.parseFromSlice(std.json.Value, alloc, job.body, .{});
         defer parsed.deinit();
         if (parsed.value != .object) return error.InvalidMangaResponse;
         const data_val = parsed.value.object.get("data") orelse return error.InvalidMangaResponse;
