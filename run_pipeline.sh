@@ -93,9 +93,12 @@ fi
 # 2. Ensure output directory structure exists for artifacts, databases, and logs
 mkdir -p "$SCRIPT_DIR/output/logs" "$SCRIPT_DIR/output/cbz" "$LIB_DIR"
 
-# Sync built driver plugins from ../driver/zig-out/lib if available
+# Sync built driver and extension plugins if available
 if [[ -d "$SCRIPT_DIR/../driver/zig-out/lib" ]]; then
     cp -u "$SCRIPT_DIR/../driver/zig-out/lib"/*.so "$LIB_DIR/" 2>/dev/null || true
+fi
+if [[ -d "$SCRIPT_DIR/../extension/zig-out/lib" ]]; then
+    cp -u "$SCRIPT_DIR/../extension/zig-out/lib"/*.so "$LIB_DIR/" 2>/dev/null || true
 fi
 
 # 3. Enforce secure permissions on shared libraries (.so) required by Parabellum ABI security policy

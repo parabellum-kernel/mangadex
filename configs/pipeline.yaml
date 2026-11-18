@@ -1,5 +1,12 @@
 version: 2
 
+extensions:
+  opentelemetry:
+    file: "${OTEL_EXPORTER_FILE_PATH:-./output/logs/otel_export.json}"
+    console: "${OTEL_LOG_CONSOLE:-false}"
+  trace_jsonl:
+    file: "${PARABELLUM_TRACE_OUT:-./output/logs/trace.jsonl}"
+
 # =============================================================================
 # MangaDex Catalog Ingestion & Synchronization Pipeline
 # Declarative, field-routed analytical pipeline with black-box tasks.
@@ -72,7 +79,7 @@ networks:
   mangadex_api:
     driver: egress
     headers:
-      User-Agent: "${MANGADEX_USER_AGENT:-VidsecMangaDex/3.0.0}"
+      User-Agent: "${MANGADEX_USER_AGENT:-ParabellumKernel/MangaDex/3.0.0}"
       Authorization: "${MANGADEX_ACCESS_TOKEN:-}"
     policy:
       block_private_ranges: true
@@ -139,14 +146,23 @@ pipelines:
   manga_sync:
     steps:
       # -----------------------------------------------------------------------
-      # STEP 1: Fetch Series Metadata from Inbound Job / tracked_targets
+      # STEP 1a: Declarative API Fetch for Series Metadata (api/call)
       # Unary filter rejects disabled jobs with zero overhead.
+      # -----------------------------------------------------------------------
+      - id: fetch_details_raw
+        uses: api/call
+        where: "enabled == true"
+        params:
+          datasource: mangadex_api
+          endpoint: get_manga
+        networks:
+          - mangadex_api
+
+      # -----------------------------------------------------------------------
+      # STEP 1b: Pure CPU Normalization of MangaDex Series JSON -> SeriesDetails
       # -----------------------------------------------------------------------
       - id: fetch_details
         uses: manga_catalog/fetch_series_details
-        where: "enabled == true"
-        networks:
-          - mangadex_api
         outputs:
           series_details:
             datasource: pipeline_memory
@@ -204,6 +220,8 @@ pipelines:
         outputs:
           downloaded_pages:
             datasource: pipeline_memory
+          discovered_pages:
+            datasource: catalog_db
 
       # -----------------------------------------------------------------------
       # STEP 6: Magic Bytes Content-Type Detection (CPU-Only, Isolated Network)
@@ -291,3 +309,15 @@ pipelines:
             params:
               remote_dir: "{library}/{series}"
               filename: "chapter_{chapter_number}.{ext}"
+
+      # -----------------------------------------------------------------------
+      # STEP 11: Cleanup Persisted Image Blobs After Successful Delivery
+      # Clears `image_blob` in `discovered_pages` while preserving metadata.
+      # -----------------------------------------------------------------------
+      - id: cleanup_blobs
+        uses: manga_catalog/cleanup_page_blobs
+        outputs:
+          discovered_pages:
+            datasource: catalog_db
+            params:
+              mode: upsert
