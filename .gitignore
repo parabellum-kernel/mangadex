@@ -2,3 +2,4 @@
 zig-out/
 output/
 zig-pkg/
+configs/.env
