@@ -1,5 +1,5 @@
 const std = @import("std");
-const abi = @import("parabellum_abi");
+const abi = @import("parabellum_sdk").task;
 
 const container = @import("container.zig");
 pub const MangaContext = container.MangaContext;
@@ -61,7 +61,7 @@ pub const CleanedPageItem = task_cleanup_blobs.CleanedPageItem;
 pub const CleanupPageBlobsService = task_cleanup_blobs.CleanupPageBlobsService;
 
 // C-ABI Task Descriptors and Manifest assembled via MangaPluginContainer
-pub const tasks = [_]abi.TaskDescriptor_ABI{
+pub const tasks = [_]abi.abi.TaskDescriptor_ABI{
     MangaPluginContainer.defineTaskService(FetchSeriesDetailsService, .{
         .name = "fetch_series_details",
         .description = "Retrieves series metadata (title, author, artist, cover URL, available languages) from configured MangaSource",
@@ -113,7 +113,7 @@ pub const tasks = [_]abi.TaskDescriptor_ABI{
     }),
 };
 
-const required_plugins = [_]abi.PluginRequirement_ABI{
+const required_plugins = [_]abi.abi.PluginRequirement_ABI{
     .{ .kind = .driver, .name = "yaml_file" },
     .{ .kind = .driver, .name = "memory" },
     .{ .kind = .driver, .name = "sqlite" },
@@ -121,7 +121,7 @@ const required_plugins = [_]abi.PluginRequirement_ABI{
     .{ .kind = .driver, .name = "ssh_store" },
 };
 
-pub const manifest: abi.ModuleManifest_ABI = abi.defineManifestWithRequires(
+pub const manifest: abi.abi.ModuleManifest_ABI = abi.defineManifestWithRequires(
     "manga_catalog",
     .{ .major = 1, .minor = 0, .patch = 0 },
     &tasks,
@@ -130,6 +130,6 @@ pub const manifest: abi.ModuleManifest_ABI = abi.defineManifestWithRequires(
 
 comptime {
     if (@import("root") == @This()) {
-        @export(&manifest, .{ .name = abi.MANIFEST_SYMBOL_NAME, .linkage = .strong });
+        @export(&manifest, .{ .name = abi.abi.MANIFEST_SYMBOL_NAME, .linkage = .strong });
     }
 }

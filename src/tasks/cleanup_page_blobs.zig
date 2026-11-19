@@ -1,6 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Logger = @import("parabellum_abi").Logger;
+const Logger = @import("parabellum_sdk").task.Logger;
 const EgressDeliveryRecord = @import("upload_cbz.zig").EgressDeliveryRecord;
 const DownloadedPageItem = @import("download_chapter_page.zig").DownloadedPageItem;
 

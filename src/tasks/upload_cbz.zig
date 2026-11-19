@@ -1,8 +1,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const abi = @import("parabellum_abi");
+const abi = @import("parabellum_sdk").task;
 const Logger = abi.Logger;
-const WebClient = @import("parabellum_sdk").WebClient;
+const WebClient = @import("parabellum_sdk").client.Client;
 const CbzArchiveOutput = @import("build_cbz_archive.zig").CbzArchiveOutput;
 
 pub const KomgaWebClient = struct {
@@ -62,8 +62,8 @@ pub const UploadCbzService = struct {
     logger: Logger,
     default_library_id: ?[]const u8 = null,
 
-    pub fn canHandle(payload: *const abi.PayloadHandle_ABI) bool {
-        const expected = comptime abi.types.schemaId(CbzArchiveOutput);
+    pub fn canHandle(payload: *const abi.abi.PayloadHandle_ABI) bool {
+        const expected = comptime abi.abi.schemaId(CbzArchiveOutput);
         return payload.schema_id != 0 and expected != 0 and payload.schema_id == expected;
     }
 

@@ -1,7 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const abi = @import("parabellum_abi");
-const WebClient = @import("parabellum_sdk").WebClient;
+const abi = @import("parabellum_sdk").task;
+const WebClient = @import("parabellum_sdk").client.Client;
 const AppConfig = @import("config.zig").AppConfig;
 const KomgaWebClient = @import("tasks/upload_cbz.zig").KomgaWebClient;
 

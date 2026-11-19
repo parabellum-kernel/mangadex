@@ -1,14 +1,14 @@
 const std = @import("std");
-const abi = @import("parabellum_abi");
+const abi = @import("parabellum_sdk").task;
 const sdk_abi = @import("parabellum_sdk").abi;
-const WebClient = @import("parabellum_sdk").WebClient;
+const WebClient = @import("parabellum_sdk").client.Client;
 const plugin = @import("mangadex_app");
 const catalog = plugin.catalog;
 
 test "Catalog plugin manifest conforms to Parabellum ABI" {
     const manifest = catalog.manifest;
 
-    try std.testing.expectEqual(abi.PARABELLUM_ABI_VERSION, manifest.abi_version);
+    try std.testing.expectEqual(abi.abi.PARABELLUM_ABI_VERSION, manifest.abi_version);
     try std.testing.expectEqualStrings("manga_catalog", manifest.nameSlice());
     try std.testing.expectEqual(@as(u32, 1), manifest.module_version.major);
     try std.testing.expectEqual(@as(usize, 11), manifest.tasks_len);
@@ -63,17 +63,17 @@ const MockPluginHost = struct {
 
     pub fn taskContext(self: *MockPluginHost) abi.TaskContext {
         const Trampoline = struct {
-            fn getParam(ctx: *abi.TaskContext_ABI, key_ptr: [*:0]const u8, out_val: *abi.Value_ABI) callconv(.c) abi.HostError_ABI {
+            fn getParam(ctx: *abi.abi.TaskContext_ABI, key_ptr: [*:0]const u8, out_val: *abi.abi.Value_ABI) callconv(.c) abi.abi.HostError_ABI {
                 const host: *MockPluginHost = @ptrCast(@alignCast(ctx.opaque_host_state));
                 const key = std.mem.span(key_ptr);
                 if (std.mem.eql(u8, key, "series_id")) {
-                    out_val.* = abi.Value_ABI.fromText(host.series_id_param);
+                    out_val.* = abi.abi.Value_ABI.fromText(host.series_id_param);
                     return .ok;
                 } else if (std.mem.eql(u8, key, "languages")) {
-                    out_val.* = abi.Value_ABI.fromText(host.languages_param);
+                    out_val.* = abi.abi.Value_ABI.fromText(host.languages_param);
                     return .ok;
                 } else if (std.mem.eql(u8, key, "body")) {
-                    out_val.* = abi.Value_ABI.fromText(
+                    out_val.* = abi.abi.Value_ABI.fromText(
                         \\{"result":"ok","response":"entity","data":{"id":"series-test-uuid","type":"manga","attributes":{"title":{"en":"Chainsaw Man"},"description":{"en":"Devil hunter"},"status":"ongoing","availableTranslatedLanguages":["en","es","fr"],"altTitles":[]},"relationships":[{"id":"a1","type":"author","attributes":{"name":"Tatsuki Fujimoto"}}]}}
                     );
                     return .ok;
@@ -81,7 +81,7 @@ const MockPluginHost = struct {
                 return .not_found;
             }
 
-            fn emitRow(ctx: *abi.TaskContext_ABI, channel_ptr: ?[*:0]const u8, fields_ptr: [*]const abi.NamedField_ABI, fields_len: usize) callconv(.c) abi.HostError_ABI {
+            fn emitRow(ctx: *abi.abi.TaskContext_ABI, channel_ptr: ?[*:0]const u8, fields_ptr: [*]const abi.abi.NamedField_ABI, fields_len: usize) callconv(.c) abi.abi.HostError_ABI {
                 const host: *MockPluginHost = @ptrCast(@alignCast(ctx.opaque_host_state));
                 const channel = if (channel_ptr) |cp| std.mem.span(cp) else "default";
                 var buf: std.ArrayListUnmanaged(u8) = .empty;
@@ -100,7 +100,7 @@ const MockPluginHost = struct {
                 return .ok;
             }
 
-            fn netRequest(_: *abi.TaskContext_ABI, req: *const abi.NetRequest_ABI, out_resp: *abi.NetResponse_ABI) callconv(.c) abi.HostError_ABI {
+            fn netRequest(_: *abi.abi.TaskContext_ABI, req: *const abi.abi.NetRequest_ABI, out_resp: *abi.abi.NetResponse_ABI) callconv(.c) abi.abi.HostError_ABI {
                 const url = req.url.toSlice();
                 if (std.mem.indexOf(u8, url, "/manga/series-test-uuid") != null and std.mem.indexOf(u8, url, "/feed") == null) {
                     const json =
@@ -108,7 +108,7 @@ const MockPluginHost = struct {
                     ;
                     out_resp.* = .{
                         .status_code = 200,
-                        .body = abi.Slice_ABI.fromSlice(json),
+                        .body = abi.abi.Slice_ABI.fromSlice(json),
                     };
                     return .ok;
                 } else if (std.mem.indexOf(u8, url, "/feed") != null) {
@@ -117,47 +117,47 @@ const MockPluginHost = struct {
                     ;
                     out_resp.* = .{
                         .status_code = 200,
-                        .body = abi.Slice_ABI.fromSlice(json),
+                        .body = abi.abi.Slice_ABI.fromSlice(json),
                     };
                     return .ok;
                 }
                 return .not_found;
             }
 
-            fn logEvent(_: *abi.TaskContext_ABI, _: abi.LogLevel_ABI, _: [*]const u8, _: usize) callconv(.c) void {}
-            fn streamSize(_: *abi.TaskContext_ABI) callconv(.c) u64 {
+            fn logEvent(_: *abi.abi.TaskContext_ABI, _: abi.abi.LogLevel_ABI, _: [*]const u8, _: usize) callconv(.c) void {}
+            fn streamSize(_: *abi.abi.TaskContext_ABI) callconv(.c) u64 {
                 return 0;
             }
-            fn streamReadAt(_: *abi.TaskContext_ABI, _: u64, _: [*]u8, _: usize) callconv(.c) abi.HostError_ABI {
+            fn streamReadAt(_: *abi.abi.TaskContext_ABI, _: u64, _: [*]u8, _: usize) callconv(.c) abi.abi.HostError_ABI {
                 return .ok;
             }
-            fn nextWindow(_: *abi.TaskContext_ABI, _: ?[*:0]const u8, _: *abi.WindowView_ABI) callconv(.c) abi.HostError_ABI {
+            fn nextWindow(_: *abi.abi.TaskContext_ABI, _: ?[*:0]const u8, _: *abi.abi.WindowView_ABI) callconv(.c) abi.abi.HostError_ABI {
                 return .end_of_stream;
             }
-            fn windowReadAt(_: *abi.TaskContext_ABI, _: *const abi.WindowView_ABI, _: u64, _: [*]u8, _: usize) callconv(.c) abi.HostError_ABI {
+            fn windowReadAt(_: *abi.abi.TaskContext_ABI, _: *const abi.abi.WindowView_ABI, _: u64, _: [*]u8, _: usize) callconv(.c) abi.abi.HostError_ABI {
                 return .ok;
             }
-            fn nextRow(_: *abi.TaskContext_ABI, _: [*:0]const u8, _: *abi.RowView_ABI) callconv(.c) abi.HostError_ABI {
+            fn nextRow(_: *abi.abi.TaskContext_ABI, _: [*:0]const u8, _: *abi.abi.RowView_ABI) callconv(.c) abi.abi.HostError_ABI {
                 return .end_of_stream;
             }
-            fn artifactWriteAt(_: *abi.TaskContext_ABI, _: u64, _: [*]const u8, _: usize) callconv(.c) abi.HostError_ABI {
+            fn artifactWriteAt(_: *abi.abi.TaskContext_ABI, _: u64, _: [*]const u8, _: usize) callconv(.c) abi.abi.HostError_ABI {
                 return .ok;
             }
-            fn artifactZeroRange(_: *abi.TaskContext_ABI, _: u64, _: u64) callconv(.c) abi.HostError_ABI {
+            fn artifactZeroRange(_: *abi.abi.TaskContext_ABI, _: u64, _: u64) callconv(.c) abi.abi.HostError_ABI {
                 return .ok;
             }
-            fn artifactTruncate(_: *abi.TaskContext_ABI, _: u64) callconv(.c) abi.HostError_ABI {
+            fn artifactTruncate(_: *abi.abi.TaskContext_ABI, _: u64) callconv(.c) abi.abi.HostError_ABI {
                 return .ok;
             }
-            fn carveToQuarantine(_: *abi.TaskContext_ABI, _: u64, _: u64, _: [*:0]const u8, _: *[64]u8) callconv(.c) abi.HostError_ABI {
+            fn carveToQuarantine(_: *abi.abi.TaskContext_ABI, _: u64, _: u64, _: [*:0]const u8, _: *[64]u8) callconv(.c) abi.abi.HostError_ABI {
                 return .ok;
             }
             fn getRepository(
-                _: *abi.TaskContext_ABI,
+                _: *abi.abi.TaskContext_ABI,
                 ds_id: [*:0]const u8,
                 out_repo: *?*anyopaque,
                 out_vt: *?*const anyopaque,
-            ) callconv(.c) abi.HostError_ABI {
+            ) callconv(.c) abi.abi.HostError_ABI {
                 const Repo = struct {
                     const IterState = struct {
                         body: []const u8,
@@ -217,7 +217,7 @@ const MockPluginHost = struct {
                 return .not_found;
             }
 
-            const vtable = abi.HostApiVTable_ABI{
+            const vtable = abi.abi.HostApiVTable_ABI{
                 .stream_size = &streamSize,
                 .stream_read_at = &streamReadAt,
                 .next_window = &nextWindow,
@@ -235,9 +235,9 @@ const MockPluginHost = struct {
             };
         };
 
-        const raw = self.allocator.create(abi.TaskContext_ABI) catch unreachable;
+        const raw = self.allocator.create(abi.abi.TaskContext_ABI) catch unreachable;
         raw.* = .{
-            .abi_version = abi.PARABELLUM_ABI_VERSION,
+            .abi_version = abi.abi.PARABELLUM_ABI_VERSION,
             .opaque_host_state = self,
             .host = &Trampoline.vtable,
         };
@@ -282,14 +282,14 @@ test "Catalog tasks return typed structs and C-ABI trampoline auto-emits outputs
     const manifest = catalog.manifest;
     const t_details = manifest.findTask("fetch_series_details").?;
     const status1 = t_details.execute(ctx.raw);
-    try std.testing.expectEqual(abi.TaskStatus_ABI.ok, status1);
+    try std.testing.expectEqual(abi.abi.TaskStatus_ABI.ok, status1);
     try std.testing.expect(host.emitted_rows.items.len >= 1);
     const row1 = host.emitted_rows.items[0];
     try std.testing.expect(std.mem.indexOf(u8, row1, "title=Chainsaw Man;") != null);
 
     const t_chapters = manifest.findTask("fetch_chapters").?;
     const status2 = t_chapters.execute(ctx.raw);
-    try std.testing.expectEqual(abi.TaskStatus_ABI.ok, status2);
+    try std.testing.expectEqual(abi.abi.TaskStatus_ABI.ok, status2);
     try std.testing.expect(host.emitted_rows.items.len >= 2);
     const row2 = host.emitted_rows.items[1];
     try std.testing.expect(std.mem.indexOf(u8, row2, "source_chapter_id=ch-es-1;") != null);

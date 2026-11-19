@@ -1,6 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const abi = @import("parabellum_abi");
+const abi = @import("parabellum_sdk").task;
 const Logger = abi.Logger;
 
 pub const MangaJob = struct {
@@ -48,7 +48,7 @@ fn getAttrString(obj: std.json.ObjectMap, key: []const u8) ?[]const u8 {
 pub const FetchSeriesDetailsService = struct {
     logger: Logger,
 
-    pub fn canHandle(payload: *const abi.PayloadHandle_ABI) bool {
+    pub fn canHandle(payload: *const abi.abi.PayloadHandle_ABI) bool {
         return payload.getReflected("body") != null and payload.getReflected("series_id") != null;
     }
 

@@ -1,8 +1,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const abi = @import("parabellum_abi");
+const abi = @import("parabellum_sdk").task;
 const Logger = abi.Logger;
-const WebClient = @import("parabellum_sdk").WebClient;
+const WebClient = @import("parabellum_sdk").client.Client;
 const SeriesDetails = @import("fetch_series_details.zig").SeriesDetails;
 
 pub const FetchChaptersInputs = struct {
@@ -123,7 +123,7 @@ pub const FetchChaptersService = struct {
 
     /// Only accepts `SeriesDetails` payloads (`series_id` + `source_id`, without chapter/page fields),
     /// preventing re-entry on `DownloadedPageItem` (`series_id` + `status`).
-    pub fn canHandle(payload: *const abi.PayloadHandle_ABI) bool {
+    pub fn canHandle(payload: *const abi.abi.PayloadHandle_ABI) bool {
         return payload.getReflected("series_id") != null and
             payload.getReflected("source_id") != null and
             payload.getReflected("page_number") == null and

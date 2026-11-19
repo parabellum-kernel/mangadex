@@ -13,7 +13,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     const parabellum_sdk_mod = sdk_dep.module("parabellum_sdk");
-    const abi_mod = sdk_dep.module("parabellum_abi");
     const zip_archive_mod = libs_dep.module("parabellum_zip_archive");
     const comicinfo_mod = libs_dep.module("comicinfo");
 
@@ -24,7 +23,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
-    app_mod.addImport("parabellum_abi", abi_mod);
     app_mod.addImport("parabellum_sdk", parabellum_sdk_mod);
     app_mod.addImport("zip_archive", zip_archive_mod);
     app_mod.addImport("comicinfo", comicinfo_mod);
@@ -36,7 +34,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
-    plugin_entry_mod.addImport("parabellum_abi", abi_mod);
     plugin_entry_mod.addImport("mangadex_app", app_mod);
 
     const catalog_lib = b.addLibrary(.{
@@ -53,7 +50,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
-    tests_mod.addImport("parabellum_abi", abi_mod);
     tests_mod.addImport("parabellum_sdk", parabellum_sdk_mod);
     tests_mod.addImport("mangadex_app", app_mod);
     tests_mod.addImport("zip_archive", zip_archive_mod);
