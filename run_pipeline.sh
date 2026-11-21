@@ -90,6 +90,23 @@ if [[ "$DO_BUILD" == true || ! -f "$LIB_DIR/libmanga_catalog.so" ]]; then
     zig build
 fi
 
+# 1b. Sync external drivers and extensions (.so) into LIB_DIR
+mkdir -p "$LIB_DIR"
+shopt -s nullglob
+for COMP_DIR in "$SCRIPT_DIR/../driver" "$SCRIPT_DIR/../extension"; do
+    if [[ "$DO_BUILD" == true || ! -d "$COMP_DIR/zig-out/lib" ]]; then
+        if [[ -d "$COMP_DIR" ]]; then
+            echo "==> Building $(basename "$COMP_DIR") (zig build)..."
+            (cd "$COMP_DIR" && zig build)
+        fi
+    fi
+    SO_FILES=("$COMP_DIR/zig-out/lib/"*.so)
+    if [[ ${#SO_FILES[@]} -gt 0 ]]; then
+        cp "${SO_FILES[@]}" "$LIB_DIR/"
+    fi
+done
+shopt -u nullglob
+
 # 2. Ensure output directory structure exists for artifacts, databases, and logs
 mkdir -p "$SCRIPT_DIR/output/logs" "$SCRIPT_DIR/output/cbz" "$LIB_DIR"
 
