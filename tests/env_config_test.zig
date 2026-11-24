@@ -1,5 +1,5 @@
 const std = @import("std");
-const EnvStore = @import("mangadex_app").env.EnvStore;
+const EnvInterpolator = @import("mangadex_app").env.EnvInterpolator;
 const AppConfig = @import("mangadex_app").AppConfig;
 
 test "EnvInterpolator.parseDotEnv expands intra-file variables and preserves single-quoted literals" {
@@ -7,7 +7,7 @@ test "EnvInterpolator.parseDotEnv expands intra-file variables and preserves sin
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    var interp = EnvStore.init(false);
+    var interp = EnvInterpolator.init(false);
     defer interp.deinit(alloc);
 
     const dotenv =

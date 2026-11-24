@@ -1,6 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const EnvStore = @import("env.zig").EnvStore;
+const EnvInterpolator = @import("parabellum_yaml").EnvInterpolator;
 
 pub const AppConfig = struct {
     api_url: []const u8 = "https://api.mangadex.org",
@@ -16,13 +16,16 @@ pub const AppConfig = struct {
 
     /// Loads configuration by resolving environment variables and/or parsing an optional `.env` file.
     pub fn load(allocator: Allocator, dot_env_path: ?[]const u8) !AppConfig {
-        var interp = EnvStore.init(true);
-        defer interp.deinit(allocator);
+        var env_arena = std.heap.ArenaAllocator.init(allocator);
+        defer env_arena.deinit();
+        const env_alloc = env_arena.allocator();
+
+        var interp = EnvInterpolator.init(true);
 
         if (dot_env_path) |path| {
             if (readDotEnvFile(allocator, path)) |content| {
                 defer allocator.free(content);
-                interp.parseDotEnv(allocator, content) catch {};
+                interp.parseDotEnv(env_alloc, content) catch {};
             }
         }
 

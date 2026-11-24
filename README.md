@@ -126,7 +126,7 @@ Runs Parabellum as a persistent daemon:
 | `KOMGA_DEFAULT_LIBRARY` | Default Komga library name | `Manga` |
 | `KOMGA_API_URL` | Komga REST API base URL | `http://127.0.0.1:25600` |
 | `KOMGA_API_KEY` | Komga `X-API-Key` header | `""` |
-| `OTEL_EXPORTER_FILE_PATH` | Output file for `opentelemetry` span logs | `./output/logs/otel_export.json` |
+| `OTEL_EXPORTER_FILE_PATH` | Output file for `opentelemetry` span logs | `./output/logs/otel_export.log` |
 | `OTEL_LOG_CONSOLE` | Mirror all OTEL spans to stderr (`true`/`false`) | `false` |
 | `PARABELLUM_TRACE_OUT` | Output file for `trace_jsonl` events | `./output/logs/trace.jsonl` |
 

@@ -15,6 +15,7 @@ pub fn build(b: *std.Build) void {
     const parabellum_sdk_mod = sdk_dep.module("parabellum_sdk");
     const zip_archive_mod = libs_dep.module("parabellum_zip_archive");
     const comicinfo_mod = libs_dep.module("comicinfo");
+    const yaml_mod = libs_dep.module("parabellum_yaml");
 
     // 3. Unified App module (`src/root.zig`: Config, Sources, Container, Tasks, Catalog)
     const app_mod = b.addModule("mangadex_app", .{
@@ -26,6 +27,7 @@ pub fn build(b: *std.Build) void {
     app_mod.addImport("parabellum_sdk", parabellum_sdk_mod);
     app_mod.addImport("zip_archive", zip_archive_mod);
     app_mod.addImport("comicinfo", comicinfo_mod);
+    app_mod.addImport("parabellum_yaml", yaml_mod);
 
     // 4. Standalone shared library plugin (`libmanga_catalog.so`)
     const plugin_entry_mod = b.createModule(.{
